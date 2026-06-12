@@ -1,0 +1,19 @@
+tenants:
+  standard:
+    name: "Standard (High-Volume Mainstream)"
+    confidence_threshold: 0.5
+    false_positive_cost: 5
+    false_negative_cost: 50
+    cost_threshold: 1000
+  enterprise:
+    name: "Enterprise (High-Value B2B)"
+    confidence_threshold: 0.8
+    false_positive_cost: 200
+    false_negative_cost: 5000
+    cost_threshold: 10000
+  free:
+    name: "Free (Cold-Start Trial)"
+    confidence_threshold: 0.6
+    false_positive_cost: 10
+    false_negative_cost: 100
+    cost_threshold: 2000

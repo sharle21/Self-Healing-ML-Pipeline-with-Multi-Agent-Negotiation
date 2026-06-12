@@ -1,6 +1,9 @@
 from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
+from typing import Any, cast
 
+import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +26,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("data")
     model_dir: Path = Path("models")
+    model_path: Path = Path("models/lgbm_credit_default.joblib")
     fixtures_dir: Path = Path("tests/fixtures")
 
     use_replay_fixtures: bool = False
@@ -32,3 +36,10 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+@lru_cache
+def load_tenants_config() -> dict[str, Any]:
+    text = files("self_healing_pipeline.config").joinpath("tenants.yaml").read_text()
+    data = yaml.safe_load(text)
+    return cast(dict[str, Any], data["tenants"])
