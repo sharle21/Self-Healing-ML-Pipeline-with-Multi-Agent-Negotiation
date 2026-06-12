@@ -19,6 +19,7 @@ class Proposal:
     rationale: str
     memory_context: dict[str, Any] = field(default_factory=dict)
     score: float = 0.0
+    degraded: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:
@@ -49,8 +50,9 @@ class ExecutionResult:
 class Agent(ABC):
     agent_type: str
 
-    def __init__(self, agent_id: str) -> None:
+    def __init__(self, agent_id: str, model_name: str | None = None) -> None:
         self.agent_id = agent_id
+        self.model_name = model_name
 
     @abstractmethod
     def can_handle(self, incident: Incident) -> bool: ...
