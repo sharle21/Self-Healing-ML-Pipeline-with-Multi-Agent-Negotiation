@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    anthropic_api_key: str = Field(..., description="Claude API key")
+    anthropic_api_key: str = Field(default="", description="Claude API key (optional for heuristic-only mode)")
     haiku_model: str = "claude-haiku-4-5-20251001"
     sonnet_model: str = "claude-sonnet-4-6"
 

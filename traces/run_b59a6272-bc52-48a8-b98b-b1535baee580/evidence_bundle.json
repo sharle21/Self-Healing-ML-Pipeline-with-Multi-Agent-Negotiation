@@ -1,0 +1,73 @@
+{
+  "all_proposals": [
+    {
+      "agent_id": "threshold-001",
+      "agent_type": "threshold",
+      "confidence": 0.7625000000000001,
+      "degraded": false,
+      "estimated_business_savings": 1275.0,
+      "estimated_compute_cost": 0.5,
+      "estimated_risk": 0.1,
+      "estimated_time": 5.0,
+      "memory_context": {},
+      "rationale": "Adjust per-tenant decision threshold for enterprise in response to drift (severity=0.85). Cheap, instant, low-risk.",
+      "score": 0.5953333333333333
+    },
+    {
+      "agent_id": "retrain-001",
+      "agent_type": "retrain",
+      "confidence": 0.7475,
+      "degraded": false,
+      "estimated_business_savings": 6800.0,
+      "estimated_compute_cost": 50.0,
+      "estimated_risk": 0.3,
+      "estimated_time": 180.0,
+      "memory_context": {},
+      "rationale": "Refit model on recent data for enterprise (drift, severity=0.85, affected=income, age). Slow + costly but high payoff.",
+      "score": 0.7035
+    }
+  ],
+  "execution_result": {
+    "actual_business_savings": 6120.0,
+    "duration": 180.0,
+    "error": null,
+    "logs": [
+      "retrain completed for tenant=enterprise"
+    ],
+    "success": true
+  },
+  "fallback_used": false,
+  "incident": {
+    "affected_features": [
+      "income",
+      "age"
+    ],
+    "detected_at": "2026-06-15T20:42:50.940794+00:00",
+    "id": "b59a6272-bc52-48a8-b98b-b1535baee580",
+    "severity": 0.85,
+    "tenant_id": "enterprise",
+    "type": "drift"
+  },
+  "reconciliation_triggered": false,
+  "scoring_breakdown": [
+    {
+      "agent_type": "retrain",
+      "confidence": 0.7475,
+      "degraded": false,
+      "savings": 6800.0,
+      "score": 0.7035
+    },
+    {
+      "agent_type": "threshold",
+      "confidence": 0.7625000000000001,
+      "degraded": false,
+      "savings": 1275.0,
+      "score": 0.5953333333333333
+    }
+  ],
+  "timestamp": "2026-06-15T20:42:50.951841+00:00",
+  "winner": {
+    "agent_type": "retrain",
+    "score": 0.7035
+  }
+}
