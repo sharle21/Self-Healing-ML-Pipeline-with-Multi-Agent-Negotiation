@@ -64,3 +64,44 @@ def test_bad_flip_prob_raises() -> None:
     sim = IncidentSimulator()
     with pytest.raises(ValueError):
         sim.inject_concept_drift(_sample_df(), feature="income", threshold=50, flip_prob=1.5)
+
+
+def test_inject_missing_values() -> None:
+    sim = IncidentSimulator(rng=np.random.default_rng(42))
+    df = _sample_df()
+    result = sim.inject_missing_values(df, features=["income"], missing_rate=0.2)
+
+    assert len(result) == len(df)
+    missing_count = result["income"].isna().sum()
+    assert missing_count > 0
+    assert missing_count <= 3
+
+
+def test_inject_duplicates() -> None:
+    sim = IncidentSimulator(rng=np.random.default_rng(42))
+    df = _sample_df()
+    result = sim.inject_duplicates(df, duplicate_rate=0.2)
+
+    assert len(result) > len(df)
+    assert len(result) <= len(df) * 1.3
+
+
+def test_inject_schema_violation() -> None:
+    sim = IncidentSimulator(rng=np.random.default_rng(42))
+    df = _sample_df()
+    result = sim.inject_schema_violation(df, feature="income", violation_rate=0.2)
+
+    assert len(result) == len(df)
+    invalid_count = (result["income"] == "INVALID").sum()
+    assert invalid_count > 0
+    assert invalid_count <= 3
+
+
+def test_inject_volume_drop() -> None:
+    sim = IncidentSimulator(rng=np.random.default_rng(42))
+    df = _sample_df()
+    result = sim.inject_volume_drop(df, drop_rate=0.3)
+
+    assert len(result) < len(df)
+    assert len(result) >= int(len(df) * 0.65)
+    assert len(result) <= int(len(df) * 0.75)
