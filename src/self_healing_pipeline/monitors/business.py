@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
+
+from self_healing_pipeline.gateway.events import Incident, IncidentType
 
 
 @dataclass(slots=True)
@@ -136,8 +138,6 @@ class BusinessCostMonitor:
         """
         if result.cost_ok:
             return None
-
-        from self_healing_pipeline.gateway.events import Incident, IncidentType
 
         # Severity: ratio of current to threshold
         severity = min(result.cost_per_prediction / max(self.cost_threshold, 1.0), 1.0)

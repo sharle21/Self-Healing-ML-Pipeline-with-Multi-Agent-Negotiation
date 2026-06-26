@@ -91,17 +91,15 @@ class DataQualityMonitor:
         schema_violations = 0
         for col in df.columns:
             if pd.api.types.is_numeric_dtype(df[col]):
-                # Try to convert; if any fail, count as violation
-                try:
-                    pd.to_numeric(df[col], errors="coerce")
-                except (ValueError, TypeError):
-                    pass
                 # Count non-convertible values
                 numeric_df = pd.to_numeric(df[col], errors="coerce")
                 schema_violations += numeric_df.isna().sum()
 
         if schema_violations > self.schema_violation_threshold:
-            issues.append(f"schema_violations={schema_violations} > {self.schema_violation_threshold}")
+            issues.append(
+                f"schema_violations={schema_violations} > "
+                f"{self.schema_violation_threshold}"
+            )
 
         # Check volume floor
         if len(df) < self.volume_floor:
