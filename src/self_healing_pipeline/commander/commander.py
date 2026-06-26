@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from self_healing_pipeline.agents.base import Agent, ExecutionResult, Proposal
+from self_healing_pipeline.commander.reconciliation import Reconciliation
 from self_healing_pipeline.gateway.events import Incident
 
 logger = logging.getLogger(__name__)
@@ -20,14 +21,16 @@ class CommanderResult:
     all_proposals: list[dict[str, Any]]
     scoring_breakdown: list[dict[str, Any]]
     reconciliation_triggered: bool = False
+    reconciliation_log: dict[str, Any] | None = None
     fallback_used: bool = False
 
 
 class Commander:
-    def __init__(self, agents: list[Agent]) -> None:
+    def __init__(self, agents: list[Agent], sonnet_model: str | None = None) -> None:
         self.agents = agents
         self.last_scoring: list[tuple[Proposal, float]] = []
         self.last_reconciliation: dict[str, Any] | None = None
+        self.reconciliation = Reconciliation(model_name=sonnet_model)
 
     def score_proposals(
         self, proposals: list[Proposal], incident: Incident
@@ -130,8 +133,17 @@ class Commander:
                 f"Reconciliation triggered for incident {incident.id} "
                 f"(top 2 scores: {scored[0].score:.3f}, {scored[1].score:.3f})"
             )
-
-        winner = scored[0]
+            result = await self.reconciliation.debate(scored[0], scored[1], incident)
+            self.last_reconciliation = {
+                "winner_type": result.winner_type,
+                "rationale": result.rationale,
+                "confidence": result.confidence,
+                "debate_log": result.debate_log,
+            }
+            # Pick the winner from reconciliation debate
+            winner = next((p for p in scored if p.agent_type == result.winner_type), scored[0])
+        else:
+            winner = scored[0]
         execution = await self.execute_with_timeout(winner, incident)
 
         fallback_used = False
@@ -163,5 +175,6 @@ class Commander:
                 for p in scored
             ],
             reconciliation_triggered=reconciliation_triggered,
+            reconciliation_log=self.last_reconciliation,
             fallback_used=fallback_used,
         )
