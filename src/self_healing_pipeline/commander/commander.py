@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from self_healing_pipeline.agents.base import Agent, ExecutionResult, Proposal
+from self_healing_pipeline.commander.escalation import Escalation
 from self_healing_pipeline.commander.reconciliation import Reconciliation
 from self_healing_pipeline.gateway.events import Incident
 
@@ -23,6 +24,8 @@ class CommanderResult:
     reconciliation_triggered: bool = False
     reconciliation_log: dict[str, Any] | None = None
     fallback_used: bool = False
+    escalation_triggered: bool = False
+    escalation_log: dict[str, Any] | None = None
 
 
 class Commander:
@@ -145,9 +148,14 @@ class Commander:
         else:
             winner = scored[0]
         execution = await self.execute_with_timeout(winner, incident)
+        failed_attempts: list[tuple[Proposal, ExecutionResult]] = []
 
         fallback_used = False
+        escalation_triggered = False
+        escalation_log: dict[str, Any] | None = None
+
         if not execution.success:
+            failed_attempts.append((winner, execution))
             logger.warning(
                 f"Winner {winner.agent_type} failed: {execution.error}. Trying next best."
             )
@@ -157,6 +165,17 @@ class Commander:
                     fallback_used = True
                     winner = backup
                     break
+                failed_attempts.append((backup, execution))
+
+            # All agents failed: escalate
+            if not execution.success:
+                escalation_triggered = True
+                escalation_result = Escalation.escalate(incident, proposals, failed_attempts)
+                escalation_log = {
+                    "reason": escalation_result.reason,
+                    "failed_attempts": escalation_result.failed_attempts,
+                }
+                logger.error(f"Escalation: {escalation_result.reason}")
 
         return CommanderResult(
             incident_id=incident.id,
@@ -177,4 +196,6 @@ class Commander:
             reconciliation_triggered=reconciliation_triggered,
             reconciliation_log=self.last_reconciliation,
             fallback_used=fallback_used,
+            escalation_triggered=escalation_triggered,
+            escalation_log=escalation_log,
         )
