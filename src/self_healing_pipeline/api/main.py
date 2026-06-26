@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from prometheus_client import REGISTRY, generate_latest
 from pydantic import BaseModel
 
 from self_healing_pipeline.config import get_settings
@@ -86,3 +87,9 @@ def predict(
         label=pred.label,
         expected_cost=pred.expected_cost,
     )
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus metrics endpoint."""
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
