@@ -57,6 +57,20 @@ class IncidentsResponse(BaseModel):
     total_count: int
 
 
+class AgentStats(BaseModel):
+    agent_type: str
+    total_proposals: int
+    successful_proposals: int
+    success_rate: float
+    total_savings: float
+    avg_savings: float
+
+
+class AgentSummaryResponse(BaseModel):
+    agents: list[AgentStats]
+    timestamp: str
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -146,6 +160,78 @@ def recent_incidents(limit: int = 100) -> IncidentsResponse:
             continue
 
     return IncidentsResponse(incidents=incidents, total_count=len(incidents))
+
+
+@app.get("/agents/summary", response_model=AgentSummaryResponse)
+def agent_summary() -> AgentSummaryResponse:
+    """Get agent performance summary from all evidence bundles."""
+    from datetime import UTC, datetime
+
+    settings = get_settings()
+    traces_dir = settings.traces_dir
+
+    if not traces_dir.exists():
+        return AgentSummaryResponse(agents=[], timestamp=datetime.now(UTC).isoformat())
+
+    # Collect stats per agent
+    agent_stats: dict[str, dict[str, float | int]] = {}
+
+    # Scan all incident directories
+    for inc_dir in sorted(traces_dir.glob("inc-*")):
+        bundle_file = inc_dir / "evidence_bundle.json"
+        if not bundle_file.exists():
+            continue
+
+        try:
+            with open(bundle_file) as f:
+                bundle = json.load(f)
+
+            # Get winner info
+            winner = bundle.get("winner", {})
+            winner_agent = winner.get("agent_type")
+            if not winner_agent:
+                continue
+
+            execution = bundle.get("execution_result", {})
+            success = execution.get("success", False)
+            savings = execution.get("actual_business_savings", 0.0)
+
+            # Initialize agent stats if needed
+            if winner_agent not in agent_stats:
+                agent_stats[winner_agent] = {
+                    "total_proposals": 0,
+                    "successful_proposals": 0,
+                    "total_savings": 0.0,
+                }
+
+            # Update stats
+            agent_stats[winner_agent]["total_proposals"] += 1
+            if success:
+                agent_stats[winner_agent]["successful_proposals"] += 1
+            agent_stats[winner_agent]["total_savings"] += savings
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    # Convert to response format
+    agents: list[AgentStats] = []
+    for agent_type, stats in sorted(agent_stats.items()):
+        total = stats["total_proposals"]
+        successful = stats["successful_proposals"]
+        success_rate = successful / total if total > 0 else 0.0
+        avg_savings = stats["total_savings"] / total if total > 0 else 0.0
+
+        agents.append(
+            AgentStats(
+                agent_type=agent_type,
+                total_proposals=int(total),
+                successful_proposals=int(successful),
+                success_rate=success_rate,
+                total_savings=stats["total_savings"],
+                avg_savings=avg_savings,
+            )
+        )
+
+    return AgentSummaryResponse(agents=agents, timestamp=datetime.now(UTC).isoformat())
 
 
 @app.get("/metrics")

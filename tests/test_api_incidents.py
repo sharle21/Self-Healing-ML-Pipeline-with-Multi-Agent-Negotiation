@@ -111,3 +111,33 @@ def test_incidents_limit_parameter(client):
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data["incidents"], list)
+
+
+def test_agent_summary_endpoint_no_bundles(client):
+    """Test agent summary endpoint returns empty list when no bundles exist."""
+    resp = client.get("/agents/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["agents"] == []
+    assert "timestamp" in data
+
+
+def test_agent_summary_structure(client):
+    """Test agent summary response schema."""
+    resp = client.get("/agents/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "agents" in data
+    assert "timestamp" in data
+    assert isinstance(data["agents"], list)
+
+    # Check individual agent structure (if any exist)
+    if data["agents"]:
+        agent = data["agents"][0]
+        assert "agent_type" in agent
+        assert "total_proposals" in agent
+        assert "successful_proposals" in agent
+        assert "success_rate" in agent
+        assert "total_savings" in agent
+        assert "avg_savings" in agent
