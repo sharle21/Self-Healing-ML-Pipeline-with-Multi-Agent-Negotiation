@@ -22,6 +22,13 @@ class RollbackAgent(Agent):
     ) -> Proposal:
         sev = max(0.0, min(1.0, incident.severity))
         confidence = 0.60 + 0.20 * sev
+
+        # Scale confidence by memory: recent_success_rate
+        agents_context = memory_context.get("agents", {})
+        if self.agent_type in agents_context:
+            recent_rate = agents_context[self.agent_type].recent_success_rate
+            confidence *= 0.5 + 0.5 * recent_rate
+
         savings = 2000.0 * sev
         rationale = (
             f"Rollback to previous model version for {incident.tenant_id} "

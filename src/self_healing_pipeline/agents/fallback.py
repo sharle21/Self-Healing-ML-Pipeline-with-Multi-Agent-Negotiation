@@ -22,6 +22,13 @@ class FallbackAgent(Agent):
     ) -> Proposal:
         sev = max(0.0, min(1.0, incident.severity))
         confidence = 0.50 + 0.15 * sev
+
+        # Scale confidence by memory: recent_success_rate
+        agents_context = memory_context.get("agents", {})
+        if self.agent_type in agents_context:
+            recent_rate = agents_context[self.agent_type].recent_success_rate
+            confidence *= 0.5 + 0.5 * recent_rate
+
         savings = 500.0 * sev
         rationale = (
             f"Switch to fallback logic for {incident.tenant_id} "
