@@ -1,0 +1,87 @@
+{
+  "incident": {
+    "id": "fb8333bd-cc61-413d-87d6-c1055879ba54",
+    "tenant_id": "enterprise",
+    "type": "data_quality",
+    "severity": 0.6
+  },
+  "all_proposals": [
+    {
+      "agent_id": "retrain",
+      "agent_type": "retrain",
+      "confidence": 0.66,
+      "estimated_business_savings": 4800.0,
+      "estimated_risk": 0.3,
+      "estimated_compute_cost": 50.0,
+      "estimated_time": 180.0,
+      "rationale": "Refit model on recent data for enterprise (data_quality, severity=0.60, affected=all features). Slow + costly but high payoff.",
+      "memory_context": {},
+      "score": 0.622,
+      "degraded": false
+    },
+    {
+      "agent_id": "rollback",
+      "agent_type": "rollback",
+      "confidence": 0.72,
+      "estimated_business_savings": 1200.0,
+      "estimated_risk": 0.05,
+      "estimated_compute_cost": 2.0,
+      "estimated_time": 15.0,
+      "rationale": "Rollback to previous model version for enterprise (data_quality, severity=0.60). Fast, safe, restores known-good behavior.",
+      "memory_context": {},
+      "score": 0.5937499999999999,
+      "degraded": false
+    },
+    {
+      "agent_id": "fallback",
+      "agent_type": "fallback",
+      "confidence": 0.59,
+      "estimated_business_savings": 300.0,
+      "estimated_risk": 0.2,
+      "estimated_compute_cost": 0.1,
+      "estimated_time": 2.0,
+      "rationale": "Switch to fallback logic for enterprise (data_quality, severity=0.60). Prevents errors, but UX degraded until root cause fixed.",
+      "memory_context": {},
+      "score": 0.5118333333333334,
+      "degraded": false
+    },
+    {
+      "agent_id": "data_repair",
+      "agent_type": "data_repair",
+      "confidence": 0.64,
+      "estimated_business_savings": 3000.0,
+      "estimated_risk": 0.25,
+      "estimated_compute_cost": 100.0,
+      "estimated_time": 300.0,
+      "rationale": "Repair data quality issues for enterprise (severity=0.60, affected=all features). High cost but durable fix; prevents future incidents.",
+      "memory_context": {},
+      "score": 0.49800000000000005,
+      "degraded": false
+    }
+  ],
+  "winner": {
+    "agent_type": "rollback"
+  },
+  "execution_result": {
+    "success": true,
+    "actual_business_savings": 1104.0,
+    "duration": 15.0,
+    "error": null,
+    "logs": [
+      "rollback completed for tenant=enterprise"
+    ]
+  },
+  "reconciliation": {
+    "winner_type": "rollback",
+    "rationale": "Debating retrain vs rollback (scores 0.622 vs 0.594)\nRisk: rollback is safer (0.05 vs 0.30)\nSpeed: rollback is faster (15.0s vs 180.0s)\nCost: rollback is cheaper ($2.0 vs $50.0)\nTiebreaker: rollback wins (confidence 0.72)",
+    "confidence": 0.72,
+    "debate_log": [
+      "Debating retrain vs rollback (scores 0.622 vs 0.594)",
+      "Risk: rollback is safer (0.05 vs 0.30)",
+      "Speed: rollback is faster (15.0s vs 180.0s)",
+      "Cost: rollback is cheaper ($2.0 vs $50.0)",
+      "Tiebreaker: rollback wins (confidence 0.72)"
+    ]
+  },
+  "timestamp": "2026-06-26T15:18:33.975309"
+}

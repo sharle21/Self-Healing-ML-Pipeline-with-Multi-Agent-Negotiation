@@ -1,0 +1,59 @@
+{
+  "incident": {
+    "id": "d2bab335-eae8-4489-bafd-c81239b3802f",
+    "tenant_id": "free",
+    "type": "cost_threshold",
+    "severity": 0.4
+  },
+  "all_proposals": [
+    {
+      "agent_id": "threshold",
+      "agent_type": "threshold",
+      "confidence": 0.65,
+      "estimated_business_savings": 600.0,
+      "estimated_risk": 0.1,
+      "estimated_compute_cost": 0.5,
+      "estimated_time": 5.0,
+      "rationale": "Adjust per-tenant decision threshold for free in response to cost_threshold (severity=0.40). Cheap, instant, low-risk.",
+      "memory_context": {},
+      "score": 0.5525833333333333,
+      "degraded": false
+    },
+    {
+      "agent_id": "fallback",
+      "agent_type": "fallback",
+      "confidence": 0.56,
+      "estimated_business_savings": 200.0,
+      "estimated_risk": 0.2,
+      "estimated_compute_cost": 0.1,
+      "estimated_time": 2.0,
+      "rationale": "Switch to fallback logic for free (cost_threshold, severity=0.40). Prevents errors, but UX degraded until root cause fixed.",
+      "memory_context": {},
+      "score": 0.5028333333333334,
+      "degraded": false
+    }
+  ],
+  "winner": {
+    "agent_type": "threshold"
+  },
+  "execution_result": {
+    "success": true,
+    "actual_business_savings": 570.0,
+    "duration": 5.0,
+    "error": null,
+    "logs": [
+      "threshold adjusted for tenant=free"
+    ]
+  },
+  "reconciliation": {
+    "winner_type": "threshold",
+    "rationale": "Debating threshold vs fallback (scores 0.553 vs 0.503)\nRisk: threshold is safer (0.10 vs 0.20)\nTiebreaker: threshold wins (confidence 0.65)",
+    "confidence": 0.65,
+    "debate_log": [
+      "Debating threshold vs fallback (scores 0.553 vs 0.503)",
+      "Risk: threshold is safer (0.10 vs 0.20)",
+      "Tiebreaker: threshold wins (confidence 0.65)"
+    ]
+  },
+  "timestamp": "2026-06-26T15:18:44.146939"
+}

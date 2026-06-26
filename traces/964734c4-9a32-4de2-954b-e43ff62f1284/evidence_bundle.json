@@ -1,0 +1,71 @@
+{
+  "incident": {
+    "id": "964734c4-9a32-4de2-954b-e43ff62f1284",
+    "tenant_id": "standard",
+    "type": "drift",
+    "severity": 0.3
+  },
+  "all_proposals": [
+    {
+      "agent_id": "threshold",
+      "agent_type": "threshold",
+      "confidence": 0.625,
+      "estimated_business_savings": 450.0,
+      "estimated_risk": 0.1,
+      "estimated_compute_cost": 0.5,
+      "estimated_time": 5.0,
+      "rationale": "Adjust per-tenant decision threshold for standard in response to drift (severity=0.30). Cheap, instant, low-risk.",
+      "memory_context": {},
+      "score": 0.5430833333333333,
+      "degraded": false
+    },
+    {
+      "agent_id": "retrain",
+      "agent_type": "retrain",
+      "confidence": 0.555,
+      "estimated_business_savings": 2400.0,
+      "estimated_risk": 0.3,
+      "estimated_compute_cost": 50.0,
+      "estimated_time": 180.0,
+      "rationale": "Refit model on recent data for standard (drift, severity=0.30, affected=all features). Slow + costly but high payoff.",
+      "memory_context": {},
+      "score": 0.4809999999999999,
+      "degraded": false
+    },
+    {
+      "agent_id": "rollback",
+      "agent_type": "rollback",
+      "confidence": 0.6599999999999999,
+      "estimated_business_savings": 600.0,
+      "estimated_risk": 0.05,
+      "estimated_compute_cost": 2.0,
+      "estimated_time": 15.0,
+      "rationale": "Rollback to previous model version for standard (drift, severity=0.30). Fast, safe, restores known-good behavior.",
+      "memory_context": {},
+      "score": 0.56375,
+      "degraded": false
+    }
+  ],
+  "winner": {
+    "agent_type": "rollback"
+  },
+  "execution_result": {
+    "success": true,
+    "actual_business_savings": 552.0,
+    "duration": 15.0,
+    "error": null,
+    "logs": [
+      "rollback completed for tenant=standard"
+    ]
+  },
+  "reconciliation": {
+    "winner_type": "rollback",
+    "rationale": "Debating rollback vs threshold (scores 0.564 vs 0.543)\nTiebreaker: rollback wins (confidence 0.66)",
+    "confidence": 0.6599999999999999,
+    "debate_log": [
+      "Debating rollback vs threshold (scores 0.564 vs 0.543)",
+      "Tiebreaker: rollback wins (confidence 0.66)"
+    ]
+  },
+  "timestamp": "2026-06-26T15:18:28.905437"
+}

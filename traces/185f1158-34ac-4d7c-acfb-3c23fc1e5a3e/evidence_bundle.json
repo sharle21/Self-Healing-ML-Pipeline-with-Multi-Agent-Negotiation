@@ -1,0 +1,74 @@
+{
+  "incident": {
+    "id": "185f1158-34ac-4d7c-acfb-3c23fc1e5a3e",
+    "tenant_id": "standard",
+    "type": "drift",
+    "severity": 0.7
+  },
+  "all_proposals": [
+    {
+      "agent_id": "threshold",
+      "agent_type": "threshold",
+      "confidence": 0.7250000000000001,
+      "estimated_business_savings": 1050.0,
+      "estimated_risk": 0.1,
+      "estimated_compute_cost": 0.5,
+      "estimated_time": 5.0,
+      "rationale": "Adjust per-tenant decision threshold for standard in response to drift (severity=0.70). Cheap, instant, low-risk.",
+      "memory_context": {},
+      "score": 0.5810833333333333,
+      "degraded": false
+    },
+    {
+      "agent_id": "retrain",
+      "agent_type": "retrain",
+      "confidence": 0.695,
+      "estimated_business_savings": 5600.0,
+      "estimated_risk": 0.3,
+      "estimated_compute_cost": 50.0,
+      "estimated_time": 180.0,
+      "rationale": "Refit model on recent data for standard (drift, severity=0.70, affected=all features). Slow + costly but high payoff.",
+      "memory_context": {},
+      "score": 0.6569999999999999,
+      "degraded": false
+    },
+    {
+      "agent_id": "rollback",
+      "agent_type": "rollback",
+      "confidence": 0.74,
+      "estimated_business_savings": 1400.0,
+      "estimated_risk": 0.05,
+      "estimated_compute_cost": 2.0,
+      "estimated_time": 15.0,
+      "rationale": "Rollback to previous model version for standard (drift, severity=0.70). Fast, safe, restores known-good behavior.",
+      "memory_context": {},
+      "score": 0.6037499999999999,
+      "degraded": false
+    }
+  ],
+  "winner": {
+    "agent_type": "rollback"
+  },
+  "execution_result": {
+    "success": true,
+    "actual_business_savings": 1288.0,
+    "duration": 15.0,
+    "error": null,
+    "logs": [
+      "rollback completed for tenant=standard"
+    ]
+  },
+  "reconciliation": {
+    "winner_type": "rollback",
+    "rationale": "Debating retrain vs rollback (scores 0.657 vs 0.604)\nRisk: rollback is safer (0.05 vs 0.30)\nSpeed: rollback is faster (15.0s vs 180.0s)\nCost: rollback is cheaper ($2.0 vs $50.0)\nTiebreaker: rollback wins (confidence 0.74)",
+    "confidence": 0.74,
+    "debate_log": [
+      "Debating retrain vs rollback (scores 0.657 vs 0.604)",
+      "Risk: rollback is safer (0.05 vs 0.30)",
+      "Speed: rollback is faster (15.0s vs 180.0s)",
+      "Cost: rollback is cheaper ($2.0 vs $50.0)",
+      "Tiebreaker: rollback wins (confidence 0.74)"
+    ]
+  },
+  "timestamp": "2026-06-26T15:18:33.963505"
+}
