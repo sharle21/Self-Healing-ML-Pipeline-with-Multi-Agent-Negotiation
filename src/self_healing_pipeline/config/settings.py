@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     model_dir: Path = Path("models")
     model_path: Path = Path("models/lgbm_credit_default.joblib")
     fixtures_dir: Path = Path("tests/fixtures")
+    traces_dir: Path = Path("traces")
 
     use_replay_fixtures: bool = False
     log_level: str = "INFO"

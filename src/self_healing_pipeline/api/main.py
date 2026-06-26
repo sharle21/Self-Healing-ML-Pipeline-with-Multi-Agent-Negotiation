@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -38,6 +40,21 @@ class PredictResponse(BaseModel):
     threshold: float
     label: int
     expected_cost: float
+
+
+class IncidentSummary(BaseModel):
+    incident_id: str
+    tenant_id: str
+    incident_type: str
+    severity: float
+    winner_agent: str | None
+    execution_success: bool | None
+    timestamp: str
+
+
+class IncidentsResponse(BaseModel):
+    incidents: list[IncidentSummary]
+    total_count: int
 
 
 @asynccontextmanager
@@ -87,6 +104,48 @@ def predict(
         label=pred.label,
         expected_cost=pred.expected_cost,
     )
+
+
+@app.get("/incidents/recent", response_model=IncidentsResponse)
+def recent_incidents(limit: int = 100) -> IncidentsResponse:
+    """Get recent incidents from evidence bundles."""
+    settings = get_settings()
+    traces_dir = settings.traces_dir
+
+    if not traces_dir.exists():
+        return IncidentsResponse(incidents=[], total_count=0)
+
+    incidents: list[IncidentSummary] = []
+
+    # Scan all incident directories
+    for inc_dir in sorted(traces_dir.glob("inc-*"), reverse=True)[:limit]:
+        bundle_file = inc_dir / "evidence_bundle.json"
+        if not bundle_file.exists():
+            continue
+
+        try:
+            with open(bundle_file) as f:
+                bundle = json.load(f)
+
+            incident = bundle.get("incident", {})
+            execution = bundle.get("execution_result", {})
+            winner = bundle.get("winner", {})
+
+            incidents.append(
+                IncidentSummary(
+                    incident_id=inc_dir.name,
+                    tenant_id=incident.get("tenant_id", "unknown"),
+                    incident_type=incident.get("type", "UNKNOWN"),
+                    severity=incident.get("severity", 0.0),
+                    winner_agent=winner.get("agent_type"),
+                    execution_success=execution.get("success"),
+                    timestamp=bundle.get("timestamp", ""),
+                )
+            )
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    return IncidentsResponse(incidents=incidents, total_count=len(incidents))
 
 
 @app.get("/metrics")
