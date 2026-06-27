@@ -11,7 +11,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from anthropic import Anthropic
+
 from self_healing_pipeline.agents.base import Proposal
+from self_healing_pipeline.config import get_settings
 from self_healing_pipeline.gateway.events import Incident
 
 logger = logging.getLogger(__name__)
@@ -116,14 +119,90 @@ class Reconciliation:
     async def _debate_with_llm(
         self, top1: Proposal, top2: Proposal, incident: Incident
     ) -> ReconciliationResult:
-        """LangGraph-based debate with Sonnet 4.6.
+        """Sonnet 4.6 debate via multi-turn conversation.
 
-        Placeholder: uses heuristic for now, swaps to Sonnet when API key available.
+        Moderator asks each agent to defend their proposal, then decides winner.
         """
-        # TODO: Implement LangGraph state machine with Sonnet 4.6
-        # For now, fall back to heuristic
-        logger.warning(
-            f"LLM reconciliation not yet implemented (model={self.model_name}). "
-            "Using heuristic debate."
-        )
-        return self._debate_heuristic(top1, top2, incident)
+        settings = get_settings()
+        if not settings.anthropic_api_key:
+            logger.warning("No API key; falling back to heuristic debate")
+            return self._debate_heuristic(top1, top2, incident)
+
+        try:
+            client = Anthropic(api_key=settings.anthropic_api_key)
+            debate_log: list[str] = []
+
+            # System prompt for moderator
+            system_prompt = """You are a fair moderator judging a debate between two ML incident response proposals.
+
+Two agents have proposed different solutions to fix an ML system failure. Your job is to evaluate their arguments and declare a winner based on:
+1. Feasibility (can it actually be executed?)
+2. Impact (how much will it improve the system?)
+3. Risk (how likely is it to cause problems?)
+4. Cost (resource usage)
+5. Speed (time to resolution)
+
+Be concise. Make a clear decision."""
+
+            # Opening: describe incident and proposals
+            opening = f"""
+Incident: {incident.type.value} (severity={incident.severity:.1f})
+Payload: {json.dumps(incident.payload)}
+
+Agent 1 ({top1.agent_type}):
+- Estimated savings: ${top1.estimated_business_savings:.0f}
+- Risk: {top1.estimated_risk:.2f}
+- Time: {top1.estimated_time:.1f}s
+- Cost: ${top1.estimated_compute_cost:.1f}
+- Confidence: {top1.confidence:.2f}
+- Rationale: {top1.rationale}
+
+Agent 2 ({top2.agent_type}):
+- Estimated savings: ${top2.estimated_business_savings:.0f}
+- Risk: {top2.estimated_risk:.2f}
+- Time: {top2.estimated_time:.1f}s
+- Cost: ${top2.estimated_compute_cost:.1f}
+- Confidence: {top2.confidence:.2f}
+- Rationale: {top2.rationale}
+
+Which agent's proposal is better overall? Declare the winner and your reasoning in 1-2 sentences."""
+
+            debate_log.append(f"Moderator: {opening[:100]}...")
+
+            # Call Sonnet for debate
+            response = client.messages.create(
+                model=self.model_name or "claude-sonnet-4-6",
+                max_tokens=300,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": opening}
+                ],
+            )
+
+            debate_text = response.content[0].text
+            debate_log.append(f"Sonnet decision: {debate_text}")
+
+            # Parse decision: which agent won?
+            winner_type = top1.agent_type
+            confidence = 0.7
+            if top2.agent_type.lower() in debate_text.lower():
+                winner_type = top2.agent_type
+            if top1.agent_type.lower() in debate_text.lower() and winner_type == top2.agent_type:
+                # Both mentioned, use heuristic tiebreaker
+                winner_type = top1.agent_type if top1.confidence >= top2.confidence else top2.agent_type
+
+            winner = top1 if winner_type == top1.agent_type else top2
+            confidence = winner.confidence
+
+            logger.info(f"Sonnet reconciliation: {winner_type} wins")
+
+            return ReconciliationResult(
+                winner_type=winner_type,
+                rationale=debate_text,
+                confidence=confidence,
+                debate_log=debate_log,
+            )
+
+        except Exception as e:
+            logger.warning(f"LLM debate failed ({e}); falling back to heuristic")
+            return self._debate_heuristic(top1, top2, incident)
