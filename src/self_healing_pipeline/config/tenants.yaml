@@ -5,15 +5,47 @@ tenants:
     false_positive_cost: 5
     false_negative_cost: 50
     cost_threshold: 1000
+    # Standard allows all agents
+    eligible_agents: ["threshold", "retrain", "rollback", "fallback", "data_repair"]
+    # Standard: balanced scoring (default weights)
+    weight_overrides:
+      business_value: 0.30
+      confidence: 0.20
+      risk_inverse: 0.20
+      cost_efficiency: 0.10
+      time_inverse: 0.05
+      historical_success: 0.15
+
   enterprise:
     name: "Enterprise (High-Value B2B)"
     confidence_threshold: 0.8
     false_positive_cost: 200
     false_negative_cost: 5000
     cost_threshold: 10000
+    # Enterprise: prefer expensive but high-confidence solutions (retrain, data_repair)
+    eligible_agents: ["retrain", "rollback", "data_repair"]
+    # Enterprise: accuracy-focused weights
+    weight_overrides:
+      business_value: 0.35
+      confidence: 0.30
+      risk_inverse: 0.15
+      cost_efficiency: 0.05
+      time_inverse: 0.05
+      historical_success: 0.10
+
   free:
     name: "Free (Cold-Start Trial)"
     confidence_threshold: 0.6
     false_positive_cost: 10
     false_negative_cost: 100
     cost_threshold: 2000
+    # Free: prefer fast, cheap solutions (threshold, fallback)
+    eligible_agents: ["threshold", "fallback"]
+    # Free: cost-focused weights
+    weight_overrides:
+      business_value: 0.25
+      confidence: 0.15
+      risk_inverse: 0.20
+      cost_efficiency: 0.25
+      time_inverse: 0.10
+      historical_success: 0.05
