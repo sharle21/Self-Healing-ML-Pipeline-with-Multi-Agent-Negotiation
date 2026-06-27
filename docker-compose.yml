@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=pipeline
+      - POSTGRES_DB=self_healing_ml
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
@@ -9,11 +25,13 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - DB_URL=postgresql://pipeline:pipeline@postgres:5432/self_healing_ml
     volumes:
       - ./data:/app/data
       - ./models:/app/models
     depends_on:
       - prometheus
+      - postgres
 
   prometheus:
     image: prom/prometheus:latest
@@ -42,3 +60,4 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  postgres_data:

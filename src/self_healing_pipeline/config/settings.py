@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
@@ -19,7 +20,12 @@ class Settings(BaseSettings):
     haiku_model: str = "claude-haiku-4-5-20251001"
     sonnet_model: str = "claude-sonnet-4-6"
 
-    db_url: str = "sqlite:///./pipeline.db"
+    db_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "DB_URL", "sqlite:///./pipeline.db"
+        ),
+        description="Database URL (PostgreSQL or SQLite)"
+    )
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000
