@@ -22,6 +22,8 @@ class DecisionOutcome(Base):
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     business_savings: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     duration: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    reward: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    incident_resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

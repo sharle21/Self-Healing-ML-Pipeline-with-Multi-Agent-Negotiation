@@ -8,7 +8,10 @@ from self_healing_pipeline.gateway.events import Incident, IncidentType
 
 
 class RollbackAgent(Agent):
-    """Revert to previous model version — fast, safe, low payoff."""
+    """Remediation Policy: Revert to previous model version.
+
+    Fast, safe, moderate payoff. Use when recent deployment caused incident.
+    """
 
     agent_type = "rollback"
 

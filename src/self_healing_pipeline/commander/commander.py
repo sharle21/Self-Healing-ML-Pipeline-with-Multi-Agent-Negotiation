@@ -7,7 +7,7 @@ from typing import Any
 
 from self_healing_pipeline.agents.base import Agent, ExecutionResult, Proposal
 from self_healing_pipeline.commander.escalation import Escalation
-from self_healing_pipeline.commander.reconciliation import Reconciliation
+from self_healing_pipeline.commander.reconciliation_langgraph import LangGraphReconciliation
 from self_healing_pipeline.gateway.events import Incident
 
 logger = logging.getLogger(__name__)
@@ -29,11 +29,17 @@ class CommanderResult:
 
 
 class Commander:
+    """Incident Response Commander: selects best remediation policy agent for each incident.
+
+    Each agent represents a distinct remediation policy (threshold adjustment, model retraining,
+    rollback, fallback, data repair). Commander scores all eligible policies, performs
+    multi-turn LLM-based reconciliation on close calls, and executes the winner.
+    """
     def __init__(self, agents: list[Agent], sonnet_model: str | None = None) -> None:
-        self.agents = agents
+        self.agents = agents  # List of remediation policy agents
         self.last_scoring: list[tuple[Proposal, float]] = []
         self.last_reconciliation: dict[str, Any] | None = None
-        self.reconciliation = Reconciliation(model_name=sonnet_model)
+        self.reconciliation = LangGraphReconciliation(model_name=sonnet_model)
 
     def score_proposals(
         self, proposals: list[Proposal], incident: Incident

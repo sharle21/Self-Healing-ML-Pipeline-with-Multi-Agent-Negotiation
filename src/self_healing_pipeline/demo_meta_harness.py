@@ -115,12 +115,13 @@ def run_demo() -> None:
                 f"estimate_accuracy={metrics.estimate_accuracy:.2f}"
             )
 
-        # Step 3: Tune weights
+        # Step 3: Tune weights with significance testing
         current_weights = ScoringWeights()
-        new_weights = WeightTuner.tune(analysis, current_weights, aggressiveness=0.1)
-        adjustment_reason = WeightTuner.compute_adjustment_reason(analysis)
-        logger.info("\nStep 3: Tuned weights")
+        new_weights, significance = WeightTuner.tune(analysis, current_weights, aggressiveness=0.1, alpha=0.05)
+        adjustment_reason = WeightTuner.compute_adjustment_reason(analysis, significance)
+        logger.info("\nStep 3: Tuned weights (with significance testing)")
         logger.info(f"  Adjustment reason: {adjustment_reason}")
+        logger.info(f"  Significance results: {significance}")
         logger.info("\n  Weight changes:")
         logger.info(f"    confidence:        {current_weights.confidence:.3f} → {new_weights.confidence:.3f}")
         logger.info(

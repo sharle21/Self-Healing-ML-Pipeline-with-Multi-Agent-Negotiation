@@ -7,6 +7,11 @@ from typing import Any
 from self_healing_pipeline.gateway.events import Incident
 
 
+# Remediation Policy Agent: encapsulates a strategy for fixing ML incidents
+# Each agent represents a distinct remediation policy (e.g., threshold adjustment,
+# model retraining, rollback, etc). Commander selects the best policy per incident.
+
+
 @dataclass(slots=True)
 class Proposal:
     agent_id: str

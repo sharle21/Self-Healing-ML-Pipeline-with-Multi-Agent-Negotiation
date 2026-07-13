@@ -11,6 +11,10 @@ from self_healing_pipeline.gateway.events import Incident, IncidentType
 
 
 class ThresholdAgent(Agent):
+    """Remediation Policy: Adjust decision threshold to control false positive/negative rates.
+
+    Fast, cheap, low-confidence fix. Good for temporary mitigation of drift/cost issues.
+    """
     agent_type = "threshold"
 
     _ELIGIBLE = frozenset(

@@ -8,7 +8,10 @@ from self_healing_pipeline.gateway.events import Incident, IncidentType
 
 
 class DataRepairAgent(Agent):
-    """Fix data quality issues — expensive, but long-term win."""
+    """Remediation Policy: Fix data quality issues at source (nulls, duplicates, schema violations).
+
+    Expensive, slow, but long-term win. Prevents recurrence of data-quality incidents.
+    """
 
     agent_type = "data_repair"
 

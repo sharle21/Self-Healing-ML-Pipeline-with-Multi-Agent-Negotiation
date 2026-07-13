@@ -8,7 +8,10 @@ from self_healing_pipeline.gateway.events import Incident, IncidentType
 
 
 class FallbackAgent(Agent):
-    """Use simpler model or default logic — safe, but degraded UX."""
+    """Remediation Policy: Switch to simpler model or rule-based fallback logic.
+
+    Instant, safe, but degraded UX. Emergency option when ML model unreliable.
+    """
 
     agent_type = "fallback"
 

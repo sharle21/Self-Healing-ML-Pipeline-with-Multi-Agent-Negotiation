@@ -11,6 +11,10 @@ from self_healing_pipeline.gateway.events import Incident, IncidentType
 
 
 class RetrainAgent(Agent):
+    """Remediation Policy: Refit model on recent data to address distribution shift.
+
+    Slow, expensive, high-confidence fix. Addresses root cause of drift. Good for sustained incidents.
+    """
     agent_type = "retrain"
 
     _ELIGIBLE = frozenset({IncidentType.DRIFT, IncidentType.DATA_QUALITY})
