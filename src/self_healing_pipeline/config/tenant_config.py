@@ -78,103 +78,155 @@ def initialize_tenant_config(
     }
 
 
-# Tier-based agent eligibility (backward compatible for existing tests)
-TENANT_AGENT_TIERS = {
+# Default tier configurations (fallback if DB not available)
+DEFAULT_TIER_CONFIGS = {
     "standard": {
-        "threshold": True,
-        "retrain": True,
-        "rollback": True,
-        "fallback": True,
-        "data_repair": True,
+        "threshold_enabled": True,
+        "retrain_enabled": True,
+        "rollback_enabled": True,
+        "fallback_enabled": True,
+        "datarepair_enabled": True,
+        "business_value_weight": 0.30,
+        "confidence_weight": 0.20,
+        "risk_inverse_weight": 0.20,
+        "cost_efficiency_weight": 0.10,
+        "time_inverse_weight": 0.05,
+        "historical_success_weight": 0.15,
     },
     "enterprise": {
-        "threshold": False,
-        "retrain": True,
-        "rollback": True,
-        "fallback": False,
-        "data_repair": True,
+        "threshold_enabled": False,
+        "retrain_enabled": True,
+        "rollback_enabled": True,
+        "fallback_enabled": False,
+        "datarepair_enabled": True,
+        "business_value_weight": 0.25,
+        "confidence_weight": 0.35,
+        "risk_inverse_weight": 0.20,
+        "cost_efficiency_weight": 0.05,
+        "time_inverse_weight": 0.05,
+        "historical_success_weight": 0.10,
     },
     "free": {
-        "threshold": True,
-        "retrain": False,
-        "rollback": False,
-        "fallback": True,
-        "data_repair": False,
-    },
-}
-
-TENANT_WEIGHT_OVERRIDES = {
-    "standard": {
-        "business_value": 0.30,
-        "confidence": 0.20,
-        "risk_inverse": 0.20,
-        "cost_efficiency": 0.10,
-        "time_inverse": 0.05,
-        "historical_success": 0.15,
-    },
-    "enterprise": {
-        "business_value": 0.25,
-        "confidence": 0.35,
-        "risk_inverse": 0.20,
-        "cost_efficiency": 0.05,
-        "time_inverse": 0.05,
-        "historical_success": 0.10,
-    },
-    "free": {
-        "business_value": 0.15,
-        "confidence": 0.15,
-        "risk_inverse": 0.10,
-        "cost_efficiency": 0.40,
-        "time_inverse": 0.10,
-        "historical_success": 0.10,
+        "threshold_enabled": True,
+        "retrain_enabled": False,
+        "rollback_enabled": False,
+        "fallback_enabled": True,
+        "datarepair_enabled": False,
+        "business_value_weight": 0.15,
+        "confidence_weight": 0.15,
+        "risk_inverse_weight": 0.10,
+        "cost_efficiency_weight": 0.40,
+        "time_inverse_weight": 0.10,
+        "historical_success_weight": 0.10,
     },
 }
 
 
-def get_eligible_agents(tenant_id: str, failed_agents: list[str]) -> list[str]:
+def get_eligible_agents(tenant_id: str, failed_agents: list[str], db_session: Any = None) -> list[str]:
     """Get agents eligible for tenant, excluding failed ones.
 
     Args:
         tenant_id: tenant identifier
         failed_agents: list of agent types that failed
+        db_session: optional DB session to load from TenantTierConfig
 
     Returns:
         List of eligible agent types
     """
-    tier_config = TENANT_AGENT_TIERS.get(tenant_id)
+    tier_config = None
+
+    # Try to load from DB if session provided
+    if db_session is not None:
+        try:
+            from self_healing_pipeline.db.models import TenantTierConfig
+            db_tier = db_session.query(TenantTierConfig).filter_by(tenant_id=tenant_id).first()
+            if db_tier:
+                tier_config = {
+                    "threshold": db_tier.threshold_enabled,
+                    "retrain": db_tier.retrain_enabled,
+                    "rollback": db_tier.rollback_enabled,
+                    "fallback": db_tier.fallback_enabled,
+                    "data_repair": db_tier.datarepair_enabled,
+                }
+        except Exception:
+            pass
+
+    # Fallback to defaults if DB lookup failed
     if tier_config is None:
-        # Unknown tenant: return failed agents as-is (fallback behavior)
-        return failed_agents
+        defaults = DEFAULT_TIER_CONFIGS.get(tenant_id)
+        if defaults is None:
+            # Unknown tenant: return failed agents as-is (fallback behavior)
+            return failed_agents
+        tier_config = {
+            "threshold": defaults["threshold_enabled"],
+            "retrain": defaults["retrain_enabled"],
+            "rollback": defaults["rollback_enabled"],
+            "fallback": defaults["fallback_enabled"],
+            "data_repair": defaults["datarepair_enabled"],
+        }
 
     eligible = [agent for agent, enabled in tier_config.items() if enabled and agent not in failed_agents]
     return eligible
 
 
-def get_weight_overrides(tenant_id: str) -> dict[str, float]:
+def get_weight_overrides(tenant_id: str, db_session: Any = None) -> dict[str, float]:
     """Get weight overrides for tenant scoring.
 
     Args:
         tenant_id: tenant identifier
+        db_session: optional DB session to load from TenantTierConfig
 
     Returns:
         Weight dict for scoring
     """
-    return TENANT_WEIGHT_OVERRIDES.get(tenant_id, TENANT_WEIGHT_OVERRIDES["standard"])
+    weights = None
+
+    # Try to load from DB if session provided
+    if db_session is not None:
+        try:
+            from self_healing_pipeline.db.models import TenantTierConfig
+            db_tier = db_session.query(TenantTierConfig).filter_by(tenant_id=tenant_id).first()
+            if db_tier:
+                weights = {
+                    "business_value": db_tier.business_value_weight,
+                    "confidence": db_tier.confidence_weight,
+                    "risk_inverse": db_tier.risk_inverse_weight,
+                    "cost_efficiency": db_tier.cost_efficiency_weight,
+                    "time_inverse": db_tier.time_inverse_weight,
+                    "historical_success": db_tier.historical_success_weight,
+                }
+        except Exception:
+            pass
+
+    # Fallback to defaults if DB lookup failed
+    if weights is None:
+        defaults = DEFAULT_TIER_CONFIGS.get(tenant_id, DEFAULT_TIER_CONFIGS["standard"])
+        weights = {
+            "business_value": defaults["business_value_weight"],
+            "confidence": defaults["confidence_weight"],
+            "risk_inverse": defaults["risk_inverse_weight"],
+            "cost_efficiency": defaults["cost_efficiency_weight"],
+            "time_inverse": defaults["time_inverse_weight"],
+            "historical_success": defaults["historical_success_weight"],
+        }
+
+    return weights
 
 
-def apply_tenant_weights(tenant_id: str, base_weights: Any) -> Any:
+def apply_tenant_weights(tenant_id: str, base_weights: Any, db_session: Any = None) -> Any:
     """Apply tenant-specific weight overrides to ScoringWeights.
 
     Args:
         tenant_id: tenant identifier
         base_weights: ScoringWeights object to modify
+        db_session: optional DB session to load from TenantTierConfig
 
     Returns:
         New ScoringWeights with tenant overrides applied
     """
     from self_healing_pipeline.meta_harness.tuner import ScoringWeights
 
-    overrides = get_weight_overrides(tenant_id)
+    overrides = get_weight_overrides(tenant_id, db_session=db_session)
 
     # Create new weights with tenant overrides
     weighted = ScoringWeights(
