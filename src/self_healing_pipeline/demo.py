@@ -1,27 +1,33 @@
-"""End-to-end demo: inject incident → agents bid → commander picks → evidence bundle."""
+"""End-to-end demo: 3-layer pipeline (observe → decide → verify)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 
-from self_healing_pipeline.agents.retrain import RetrainAgent
-from self_healing_pipeline.agents.threshold import ThresholdAgent
-from self_healing_pipeline.commander.commander import Commander
+from self_healing_pipeline.agents.datarepair_v2 import DataRepairAgent
+from self_healing_pipeline.agents.fallback_v2 import FallbackAgent
+from self_healing_pipeline.agents.retrain_v2 import RetrainAgent
+from self_healing_pipeline.agents.rollback_v2 import RollbackAgent
+from self_healing_pipeline.agents.threshold_v2 import ThresholdAdjustmentAgent
+from self_healing_pipeline.commander.commander_v3 import CommanderV3
 from self_healing_pipeline.gateway.events import Incident, IncidentType
-from self_healing_pipeline.memory import BundleWriter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    threshold_agent = ThresholdAgent(agent_id="threshold-001")
-    retrain_agent = RetrainAgent(agent_id="retrain-001")
+    # Initialize 5 remediation policy agents
+    agents = [
+        ThresholdAdjustmentAgent("threshold-1"),
+        RetrainAgent("retrain-1"),
+        RollbackAgent("rollback-1"),
+        FallbackAgent("fallback-1"),
+        DataRepairAgent("datarepair-1"),
+    ]
 
-    commander = Commander([threshold_agent, retrain_agent])
-    bundle_writer = BundleWriter(traces_dir=Path("traces"))
+    commander = CommanderV3(agents)
 
     incident = Incident(
         tenant_id="enterprise",
@@ -32,37 +38,28 @@ async def main() -> None:
     )
 
     logger.info(f"🚨 Incident created: {incident.id} (type={incident.type.value})")
-    logger.info(f"   Tenant: {incident.tenant_id}, Severity: {incident.severity}")
+    logger.info(f"   Tenant: {incident.tenant_id}")
 
     result = await commander.handle_incident(incident)
 
     logger.info(f"\n✅ Winner: {result.winning_agent_type}")
     logger.info(
-        f"   Score: {result.winning_proposal.get('score', 0.0):.3f}, "
-        f"Savings: ${result.winning_proposal.get('estimated_business_savings', 0.0):.2f}"
+        f"   Severity: {result.severity:.3f}, "
+        f"Confidence: {result.winning_plan.get('confidence', 0.0):.3f}"
     )
+    logger.info(f"   Reward: {result.reward:.3f}")
     logger.info(f"   Execution: {'SUCCESS' if result.execution_result.get('success') else 'FAILED'}")
+    logger.info(f"   Incident Resolved: {result.incident_resolved}")
 
-    if result.fallback_used:
-        logger.warning("   ⚠️  Fallback to next-best agent was used")
+    if result.reconciliation_triggered:
+        logger.warning("   ⚠️  Reconciliation was triggered for close call")
 
-    logger.info(f"\n📊 All proposals ({len(result.all_proposals)}):")
-    for i, proposal in enumerate(result.all_proposals, 1):
-        logger.info(
-            f"   {i}. {proposal['agent_type']}: "
-            f"confidence={proposal['confidence']:.2f}, "
-            f"savings=${proposal['estimated_business_savings']:.2f}"
-        )
+    if result.escalation_triggered:
+        logger.error("   ⛔ Escalation: all agents failed")
 
-    bundle_path = bundle_writer.write_commander_result(incident, result)
-    logger.info(f"\n📦 Evidence bundle written: {bundle_path}")
-
-    bundle = bundle_writer.read(incident.id)
-    if bundle:
-        logger.info(f"\n📄 Bundle contents (excerpt):")
-        logger.info(f"   Incident: {bundle['incident']['id']}")
-        logger.info(f"   Winner: {bundle['winner']['agent_type']} (score: {bundle['winner']['score']:.3f})")
-        logger.info(f"   Execution: {bundle['execution_result']['success']}")
+    logger.info(f"\n📊 Verification breakdown:")
+    for key, value in result.verification_breakdown.items():
+        logger.info(f"   {key}: {value}")
 
 
 if __name__ == "__main__":
