@@ -314,51 +314,20 @@ class CommanderV3:
         self.db_session.add(action)
         self.db_session.commit()
 
-    def _load_tenant_config(self, tenant_id: str) -> dict[str, Any]:
-        """Load tenant-specific config from DB.
+    def _load_tenant_config(self, tenant_id: str) -> TenantConfig | None:
+        """Load tenant-specific config from DB (no defaults).
 
         Args:
             tenant_id: tenant identifier
 
         Returns:
-            config dict with tenant settings
+            TenantConfig row or None if not found
         """
-        if tenant_id in self.tenant_configs:
-            return self.tenant_configs[tenant_id]
-
         if not self.db_session:
-            return self._default_tenant_config()
+            return None
 
         config_row = self.db_session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
-        if config_row:
-            config = {
-                "decision_threshold": config_row.decision_threshold,
-                "model_version": config_row.model_version,
-                "latency_sla": config_row.latency_sla,
-                "accuracy_target": config_row.accuracy_target,
-                "cost_budget": config_row.cost_budget,
-                "last_training_time": config_row.last_training_time,
-            }
-        else:
-            config = self._default_tenant_config()
-            # Store default for future
-            config_row = TenantConfig(tenant_id=tenant_id, **config)
-            self.db_session.add(config_row)
-            self.db_session.commit()
-
-        self.tenant_configs[tenant_id] = config
-        return config
-
-    def _default_tenant_config(self) -> dict[str, Any]:
-        """Return default tenant config."""
-        return {
-            "decision_threshold": 0.5,
-            "model_version": "v1",
-            "latency_sla": 100.0,
-            "accuracy_target": 0.75,
-            "cost_budget": 0.10,
-            "last_training_time": None,
-        }
+        return config_row
 
     def _get_agent_state(self, incident_type: IncidentType, telemetry: Any) -> dict[str, Any]:
         """Construct appropriate state dict for agents based on incident type.

@@ -69,12 +69,25 @@ class TenantConfig(Base):
     __tablename__ = "tenant_config"
 
     tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    decision_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
-    model_version: Mapped[str] = mapped_column(String(64), nullable=False, default="v1")
-    latency_sla: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
-    accuracy_target: Mapped[float] = mapped_column(Float, nullable=False, default=0.75)
-    cost_budget: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)
-    last_training_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Deployment (from training pipeline)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    last_training_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # Baselines (measured once during validation)
+    baseline_auc: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Alert thresholds (derived from baselines + tolerance)
+    min_auc: Mapped[float] = mapped_column(Float, nullable=False)
+    max_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    max_missing_rate: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Business constraints (operator-defined)
+    daily_cost_budget: Mapped[float] = mapped_column(Float, nullable=False)
+    latency_sla_ms: Mapped[float] = mapped_column(Float, nullable=False)
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
