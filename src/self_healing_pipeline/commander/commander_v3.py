@@ -202,9 +202,6 @@ class CommanderV3:
             f"(success={execution_result.success}, duration={execution_result.duration:.1f}s)"
         )
 
-        # Store remediation action
-        self._store_remediation_action(incident, execution_agent, winning_plan, execution_result)
-
         # Layer 3: VERIFICATION (Measure & Reward)
         logger.info("[Verify] Collecting post-execution telemetry...")
 
@@ -230,6 +227,9 @@ class CommanderV3:
             f"metric_improvement={reward_breakdown.metric_improvement:.2f}, "
             f"cost_efficiency={reward_breakdown.cost_efficiency:.2f})"
         )
+
+        # Store remediation action with reward
+        self._store_remediation_action(incident, execution_agent, winning_plan, execution_result, reward)
 
         return CommanderResultV3(
             incident_id=incident.id,
@@ -275,9 +275,8 @@ class CommanderV3:
         history = IncidentHistory(
             incident_id=incident.id,
             tenant_id=incident.tenant_id,
-            incident_type=incident.type.value,
+            type=incident.type.value,
             severity=severity,
-            payload=incident.payload or {},
         )
         self.db_session.add(history)
         self.db_session.commit()
@@ -288,6 +287,7 @@ class CommanderV3:
         agent: RemediationPolicyAgent,
         plan: Any,
         execution_result: Any,
+        reward: float = 0.0,
     ) -> None:
         """Store remediation action for audit trail.
 
@@ -296,29 +296,32 @@ class CommanderV3:
             agent: agent that executed
             plan: remediation plan
             execution_result: execution result
+            reward: calculated reward
         """
         if not self.db_session:
             return
 
+        proposal_dict = asdict(plan) if hasattr(plan, '__dataclass_fields__') else vars(plan)
+
         action = RemediationAction(
             incident_id=incident.id,
-            tenant_id=incident.tenant_id,
-            agent_type=agent.agent_type,
-            action=plan.action,
-            confidence=plan.confidence,
-            execution_time=execution_result.duration,
+            agent=agent.agent_type,
+            proposal=proposal_dict,
+            chosen=True,
+            reward=reward,
+            success=execution_result.success,
         )
         self.db_session.add(action)
         self.db_session.commit()
 
     def _load_tenant_config(self, tenant_id: str) -> dict[str, Any]:
-        """Load tenant-specific thresholds from DB.
+        """Load tenant-specific config from DB.
 
         Args:
             tenant_id: tenant identifier
 
         Returns:
-            config dict with thresholds
+            config dict with tenant settings
         """
         if tenant_id in self.tenant_configs:
             return self.tenant_configs[tenant_id]
@@ -329,10 +332,12 @@ class CommanderV3:
         config_row = self.db_session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
         if config_row:
             config = {
-                "auc_threshold": config_row.auc_threshold,
-                "latency_threshold": config_row.latency_threshold,
-                "cost_threshold": config_row.cost_threshold,
-                "missing_rate_threshold": config_row.missing_rate_threshold,
+                "decision_threshold": config_row.decision_threshold,
+                "model_version": config_row.model_version,
+                "latency_sla": config_row.latency_sla,
+                "accuracy_target": config_row.accuracy_target,
+                "cost_budget": config_row.cost_budget,
+                "last_training_time": config_row.last_training_time,
             }
         else:
             config = self._default_tenant_config()
@@ -347,10 +352,12 @@ class CommanderV3:
     def _default_tenant_config(self) -> dict[str, Any]:
         """Return default tenant config."""
         return {
-            "auc_threshold": 0.75,
-            "latency_threshold": 100.0,
-            "cost_threshold": 0.10,
-            "missing_rate_threshold": 0.05,
+            "decision_threshold": 0.5,
+            "model_version": "v1",
+            "latency_sla": 100.0,
+            "accuracy_target": 0.75,
+            "cost_budget": 0.10,
+            "last_training_time": None,
         }
 
     def _get_agent_state(self, incident_type: IncidentType, telemetry: Any) -> dict[str, Any]:
