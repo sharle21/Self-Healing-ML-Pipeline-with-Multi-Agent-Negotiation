@@ -12,6 +12,10 @@ from prometheus_client import REGISTRY, generate_latest
 from pydantic import BaseModel
 
 from self_healing_pipeline.config import get_settings
+from self_healing_pipeline.observability.metrics import (
+    prediction_count,
+    prediction_latency,
+)
 from self_healing_pipeline.pipeline.serving import ModelServer
 
 SERVICE_NAME = "self-healing-pipeline"
@@ -105,12 +109,22 @@ def predict(
     body: PredictRequest,
     server: Annotated[ModelServer, Depends(get_model_server)],
 ) -> PredictResponse:
+    import time
+
     if tenant_id not in server.tenants:
         raise HTTPException(status_code=404, detail=f"unknown tenant {tenant_id!r}")
+
+    start_time = time.time()
     try:
         pred = server.predict(tenant_id, body.features)
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=str(exc).strip("'")) from exc
+    finally:
+        # Record metrics
+        duration = time.time() - start_time
+        prediction_count.labels(tenant_id=tenant_id).inc()
+        prediction_latency.labels(tenant_id=tenant_id).observe(duration)
+
     return PredictResponse(
         tenant_id=pred.tenant_id,
         probability=pred.probability,

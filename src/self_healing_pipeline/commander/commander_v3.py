@@ -19,6 +19,11 @@ from self_healing_pipeline.db.models import (
     TenantPolicy,
     TenantTierConfig,
 )
+from self_healing_pipeline.observability.metrics import (
+    incident_count,
+    agent_win_count,
+    prediction_latency,
+)
 from self_healing_pipeline.gateway.events import Incident, IncidentType
 from self_healing_pipeline.observability import (
     SeverityCalculator,
@@ -91,6 +96,9 @@ class CommanderV3:
         """
         # Layer 1: OBSERVATION
         logger.info(f"[Observe] Incident {incident.id} type={incident.type.value}")
+
+        # Record incident
+        incident_count.labels(tenant_id=incident.tenant_id, type=incident.type.value).inc()
 
         # Load policy + validation + runtime profile
         tenant_policy = self._load_tenant_policy(incident.tenant_id)
@@ -186,12 +194,21 @@ class CommanderV3:
             f"(confidence={winning_plan.confidence:.3f})"
         )
 
+        # Record agent win
+        agent_win_count.labels(agent_type=winning_agent.agent_type).inc()
+
         # Layer 2b: EXECUTION (Run plan with fallback)
         logger.info(f"[Execute] Running {winning_plan.action}...")
 
+        import time
+        exec_start = time.time()
         execution_result = await winning_agent.execute(winning_plan)
+        exec_duration = time.time() - exec_start
         execution_agent = winning_agent
         fallback_attempts = []
+
+        # Record execution latency (in seconds)
+        prediction_latency.labels(tenant_id=incident.tenant_id).observe(exec_duration)
 
         # Fallback: try next best if winner fails
         if not execution_result.success and len(plans) > 1:
