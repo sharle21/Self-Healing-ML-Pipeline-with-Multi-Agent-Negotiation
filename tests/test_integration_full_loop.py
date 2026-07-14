@@ -16,7 +16,13 @@ from self_healing_pipeline.config.tenant_config import (
     ValidationMetrics,
     initialize_tenant_config,
 )
-from self_healing_pipeline.db.models import TenantConfig, DecisionOutcome, Base
+from self_healing_pipeline.db.models import (
+    TenantPolicy,
+    ModelValidationReport,
+    RuntimeDeploymentProfile,
+    DecisionOutcome,
+    Base,
+)
 from self_healing_pipeline.db.session import get_engine, session_scope
 from self_healing_pipeline.gateway.events import Incident, IncidentType
 
@@ -57,16 +63,40 @@ class TestFullIntegrationLoop:
                 deployment_timestamp=datetime.now(),
             )
 
-            config_dict = initialize_tenant_config(
+            # Create TenantPolicy (governance)
+            policy = TenantPolicy(
                 tenant_id="test-tenant",
-                validation_metrics=validation_metrics,
-                deployment_profile=deployment_profile,
+                min_acceptable_auc=validation_metrics.auc - 0.03,
+                max_acceptable_latency_ms=deployment_profile.latency_p95_ms * 1.2,
                 daily_cost_budget=100.0,
                 latency_sla_ms=100.0,
             )
+            session.add(policy)
 
-            tenant_config = TenantConfig(**config_dict)
-            session.add(tenant_config)
+            # Create ModelValidationReport (immutable)
+            val_report = ModelValidationReport(
+                model_version=deployment_profile.model_version,
+                tenant_id="test-tenant",
+                auc=validation_metrics.auc,
+                precision=validation_metrics.precision,
+                recall=validation_metrics.recall,
+                f1_score=validation_metrics.f1,
+                optimal_threshold=validation_metrics.optimal_threshold,
+                calibration_error=0.05,
+                validated_at=validation_metrics.validation_timestamp,
+            )
+            session.add(val_report)
+
+            # Create RuntimeDeploymentProfile (continuous)
+            runtime = RuntimeDeploymentProfile(
+                tenant_id="test-tenant",
+                model_version=deployment_profile.model_version,
+                latency_p95_ms=deployment_profile.latency_p95_ms,
+                latency_p99_ms=deployment_profile.latency_p99_ms,
+                throughput_rps=float(deployment_profile.throughput_rps),
+                measured_at=deployment_profile.deployment_timestamp,
+            )
+            session.add(runtime)
             session.commit()
 
             # Initialize commander with DB session
@@ -176,15 +206,55 @@ class TestFullIntegrationLoop:
                 latency_sla_ms=500.0,
             )
 
-            # Store both
-            session.add(TenantConfig(**strict_config))
-            session.add(TenantConfig(**lenient_config))
+            # Store policies
+            strict_policy = TenantPolicy(
+                tenant_id="strict",
+                min_acceptable_auc=strict_config["min_auc"],
+                max_acceptable_latency_ms=strict_config["max_latency_ms"],
+                latency_sla_ms=strict_config["latency_sla_ms"],
+                daily_cost_budget=strict_config["daily_cost_budget"],
+            )
+            lenient_policy = TenantPolicy(
+                tenant_id="lenient",
+                min_acceptable_auc=lenient_config["min_auc"],
+                max_acceptable_latency_ms=lenient_config["max_latency_ms"],
+                latency_sla_ms=lenient_config["latency_sla_ms"],
+                daily_cost_budget=lenient_config["daily_cost_budget"],
+            )
+            session.add(strict_policy)
+            session.add(lenient_policy)
+
+            # Store validation reports
+            strict_val = ModelValidationReport(
+                model_version="v5",
+                tenant_id="strict",
+                auc=0.85,
+                precision=0.87,
+                recall=0.83,
+                f1_score=0.85,
+                optimal_threshold=0.60,
+                calibration_error=0.02,
+                validated_at=datetime.now(),
+            )
+            lenient_val = ModelValidationReport(
+                model_version="v3",
+                tenant_id="lenient",
+                auc=0.70,
+                precision=0.72,
+                recall=0.68,
+                f1_score=0.70,
+                optimal_threshold=0.50,
+                calibration_error=0.05,
+                validated_at=datetime.now(),
+            )
+            session.add(strict_val)
+            session.add(lenient_val)
             session.commit()
 
-            # Verify they have different thresholds
-            strict = session.query(TenantConfig).filter_by(tenant_id="strict").first()
-            lenient = session.query(TenantConfig).filter_by(tenant_id="lenient").first()
+            # Verify they have different policies
+            strict = session.query(TenantPolicy).filter_by(tenant_id="strict").first()
+            lenient = session.query(TenantPolicy).filter_by(tenant_id="lenient").first()
 
-            assert strict.baseline_auc > lenient.baseline_auc
+            assert strict.min_acceptable_auc > lenient.min_acceptable_auc
             assert strict.latency_sla_ms < lenient.latency_sla_ms
             assert strict.daily_cost_budget < lenient.daily_cost_budget

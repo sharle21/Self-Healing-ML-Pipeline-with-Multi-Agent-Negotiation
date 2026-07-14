@@ -1,4 +1,4 @@
-"""Tenant onboarding: initialize new tenant in system."""
+"""Tenant onboarding: initialize new tenant in system with separate policy/validation/runtime records."""
 
 from __future__ import annotations
 
@@ -9,9 +9,12 @@ from sqlalchemy.orm import Session
 from self_healing_pipeline.config.tenant_config import (
     DeploymentProfile,
     ValidationMetrics,
-    initialize_tenant_config,
 )
-from self_healing_pipeline.db.models import TenantConfig
+from self_healing_pipeline.db.models import (
+    TenantPolicy,
+    ModelValidationReport,
+    RuntimeDeploymentProfile,
+)
 
 
 def onboard_tenant(
@@ -21,8 +24,10 @@ def onboard_tenant(
     deployment_profile: DeploymentProfile,
     daily_cost_budget: float,
     latency_sla_ms: float,
-) -> TenantConfig:
-    """Onboard new tenant with measured validation + deployment data.
+    auc_degradation_tolerance: float = 0.03,
+    latency_multiplier: float = 1.2,
+) -> dict[str, Any]:
+    """Onboard new tenant: create policy + validation report + runtime profile.
 
     Args:
         db_session: database session
@@ -31,68 +36,108 @@ def onboard_tenant(
         deployment_profile: measured deployment characteristics
         daily_cost_budget: operator-defined daily budget
         latency_sla_ms: operator-defined SLA
+        auc_degradation_tolerance: threshold for AUC alerts
+        latency_multiplier: multiplier for latency alerts
 
     Returns:
-        TenantConfig row in DB
+        Dict with policy, validation_report, runtime_profile
     """
-    config_dict = initialize_tenant_config(
+    # Create TenantPolicy (governance)
+    policy = TenantPolicy(
         tenant_id=tenant_id,
-        validation_metrics=validation_metrics,
-        deployment_profile=deployment_profile,
+        min_acceptable_auc=validation_metrics.auc - auc_degradation_tolerance,
+        max_acceptable_latency_ms=deployment_profile.latency_p95_ms * latency_multiplier,
         daily_cost_budget=daily_cost_budget,
         latency_sla_ms=latency_sla_ms,
     )
+    db_session.add(policy)
 
-    # Check if tenant already exists
-    existing = db_session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
-    if existing:
-        # Update existing
-        for key, value in config_dict.items():
-            if key != "tenant_id":
-                setattr(existing, key, value)
-        db_session.commit()
-        return existing
+    # Create ModelValidationReport (immutable)
+    validation_report = ModelValidationReport(
+        model_version=deployment_profile.model_version,
+        tenant_id=tenant_id,
+        auc=validation_metrics.auc,
+        precision=validation_metrics.precision,
+        recall=validation_metrics.recall,
+        f1_score=validation_metrics.f1,
+        optimal_threshold=validation_metrics.optimal_threshold,
+        calibration_error=0.05,
+        validated_at=validation_metrics.validation_timestamp,
+    )
+    db_session.add(validation_report)
 
-    # Create new
-    config_row = TenantConfig(**config_dict)
-    db_session.add(config_row)
+    # Create RuntimeDeploymentProfile (continuous)
+    runtime_profile = RuntimeDeploymentProfile(
+        tenant_id=tenant_id,
+        model_version=deployment_profile.model_version,
+        latency_p95_ms=deployment_profile.latency_p95_ms,
+        latency_p99_ms=deployment_profile.latency_p99_ms,
+        throughput_rps=float(deployment_profile.throughput_rps),
+        measured_at=deployment_profile.deployment_timestamp,
+    )
+    db_session.add(runtime_profile)
     db_session.commit()
-    db_session.refresh(config_row)
-    return config_row
+
+    return {
+        "tenant_id": tenant_id,
+        "policy": policy,
+        "validation_report": validation_report,
+        "runtime_profile": runtime_profile,
+    }
 
 
-def get_tenant_config(db_session: Session, tenant_id: str) -> TenantConfig | None:
-    """Retrieve tenant config from DB.
+def get_tenant_policy(db_session: Session, tenant_id: str) -> TenantPolicy | None:
+    """Retrieve tenant policy from DB.
 
     Args:
         db_session: database session
         tenant_id: tenant identifier
 
     Returns:
-        TenantConfig or None if not found
+        TenantPolicy or None if not found
     """
-    return db_session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
+    return db_session.query(TenantPolicy).filter_by(tenant_id=tenant_id).first()
+
+
+def get_latest_validation_report(
+    db_session: Session, tenant_id: str
+) -> ModelValidationReport | None:
+    """Get latest model validation report for tenant.
+
+    Args:
+        db_session: database session
+        tenant_id: tenant identifier
+
+    Returns:
+        Latest ModelValidationReport or None
+    """
+    return (
+        db_session.query(ModelValidationReport)
+        .filter_by(tenant_id=tenant_id)
+        .order_by(ModelValidationReport.validated_at.desc())
+        .first()
+    )
 
 
 def list_tenants(db_session: Session) -> list[dict[str, Any]]:
-    """List all configured tenants.
+    """List all configured tenants with their policies.
 
     Args:
         db_session: database session
 
     Returns:
-        List of tenant configs as dicts
+        List of tenant info dicts
     """
-    configs = db_session.query(TenantConfig).all()
+    policies = db_session.query(TenantPolicy).all()
     return [
         {
-            "tenant_id": c.tenant_id,
-            "model_version": c.model_version,
-            "baseline_auc": c.baseline_auc,
-            "baseline_latency_ms": c.baseline_latency_ms,
-            "latency_sla_ms": c.latency_sla_ms,
-            "daily_cost_budget": c.daily_cost_budget,
-            "updated_at": c.updated_at.isoformat(),
+            "tenant_id": p.tenant_id,
+            "min_acceptable_auc": p.min_acceptable_auc,
+            "max_acceptable_latency_ms": p.max_acceptable_latency_ms,
+            "latency_sla_ms": p.latency_sla_ms,
+            "daily_cost_budget": p.daily_cost_budget,
+            "risk_tolerance": p.risk_tolerance,
+            "updated_at": p.updated_at.isoformat(),
         }
-        for c in configs
+        for p in policies
     ]

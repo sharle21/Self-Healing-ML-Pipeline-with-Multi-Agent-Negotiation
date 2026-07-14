@@ -13,8 +13,11 @@ from self_healing_pipeline.agents.remediation_policy import RemediationPolicyAge
 from self_healing_pipeline.commander.reconciliation_langgraph import LangGraphReconciliation
 from self_healing_pipeline.db.models import (
     IncidentHistory,
+    ModelValidationReport,
     RemediationAction,
-    TenantConfig,
+    RuntimeDeploymentProfile,
+    TenantPolicy,
+    TenantTierConfig,
 )
 from self_healing_pipeline.gateway.events import Incident, IncidentType
 from self_healing_pipeline.observability import (
@@ -89,23 +92,27 @@ class CommanderV3:
         # Layer 1: OBSERVATION
         logger.info(f"[Observe] Incident {incident.id} type={incident.type.value}")
 
-        # Load tenant config for severity calculation
-        tenant_config = self._load_tenant_config(incident.tenant_id)
-        tenant_config_dict = None
-        if tenant_config:
-            tenant_config_dict = {
-                "baseline_auc": tenant_config.baseline_auc,
-                "min_auc": tenant_config.min_auc,
-                "baseline_latency_ms": tenant_config.baseline_latency_ms,
-                "max_latency_ms": tenant_config.max_latency_ms,
-                "max_missing_rate": tenant_config.max_missing_rate,
-                "latency_sla_ms": tenant_config.latency_sla_ms,
-                "daily_cost_budget": tenant_config.daily_cost_budget,
+        # Load policy + validation + runtime profile
+        tenant_policy = self._load_tenant_policy(incident.tenant_id)
+        validation_report = self._get_latest_validation_report(incident.tenant_id)
+        runtime_profile = self._get_latest_runtime_profile(incident.tenant_id)
+
+        # Compose into severity config
+        severity_config = None
+        if tenant_policy and validation_report and runtime_profile:
+            severity_config = {
+                "baseline_auc": validation_report.auc,
+                "min_auc": tenant_policy.min_acceptable_auc,
+                "baseline_latency_ms": runtime_profile.latency_p95_ms,
+                "max_latency_ms": tenant_policy.max_acceptable_latency_ms,
+                "max_missing_rate": tenant_policy.max_acceptable_missing_rate,
+                "latency_sla_ms": tenant_policy.latency_sla_ms,
+                "daily_cost_budget": tenant_policy.daily_cost_budget,
             }
 
         telemetry_before = self.telemetry_collector.collect()
         severity, severity_breakdown = self.severity_calculator.calculate(
-            incident.type, telemetry_before, tenant_config=tenant_config_dict
+            incident.type, telemetry_before, tenant_config=severity_config
         )
 
         logger.info(
@@ -328,20 +335,67 @@ class CommanderV3:
         self.db_session.add(action)
         self.db_session.commit()
 
-    def _load_tenant_config(self, tenant_id: str) -> TenantConfig | None:
-        """Load tenant-specific config from DB (no defaults).
+    def _load_tenant_policy(self, tenant_id: str) -> TenantPolicy | None:
+        """Load tenant policy (governance decisions) from DB.
 
         Args:
             tenant_id: tenant identifier
 
         Returns:
-            TenantConfig row or None if not found
+            TenantPolicy row or None if not found
         """
         if not self.db_session:
             return None
+        return self.db_session.query(TenantPolicy).filter_by(tenant_id=tenant_id).first()
 
-        config_row = self.db_session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
-        return config_row
+    def _get_latest_validation_report(self, tenant_id: str) -> ModelValidationReport | None:
+        """Get latest model validation report for tenant.
+
+        Args:
+            tenant_id: tenant identifier
+
+        Returns:
+            Latest ModelValidationReport or None
+        """
+        if not self.db_session:
+            return None
+        return (
+            self.db_session.query(ModelValidationReport)
+            .filter_by(tenant_id=tenant_id)
+            .order_by(ModelValidationReport.validated_at.desc())
+            .first()
+        )
+
+    def _get_latest_runtime_profile(self, tenant_id: str) -> RuntimeDeploymentProfile | None:
+        """Get latest runtime deployment profile for tenant.
+
+        Args:
+            tenant_id: tenant identifier
+
+        Returns:
+            Latest RuntimeDeploymentProfile or None
+        """
+        if not self.db_session:
+            return None
+        return (
+            self.db_session.query(RuntimeDeploymentProfile)
+            .filter_by(tenant_id=tenant_id)
+            .order_by(RuntimeDeploymentProfile.updated_at.desc())
+            .first()
+        )
+
+    def _load_tenant_tier_config(self, tenant_id: str) -> TenantTierConfig | None:
+        """Load tenant tier config (agent eligibility + weights) from DB.
+
+        Args:
+            tenant_id: tenant identifier
+
+        Returns:
+            TenantTierConfig row or None if not found
+        """
+        if not self.db_session:
+            return None
+        return self.db_session.query(TenantTierConfig).filter_by(tenant_id=tenant_id).first()
 
     def _get_agent_state(self, incident_type: IncidentType, telemetry: Any) -> dict[str, Any]:
         """Construct appropriate state dict for agents based on incident type.

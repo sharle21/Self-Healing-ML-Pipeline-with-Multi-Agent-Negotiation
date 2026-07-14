@@ -65,28 +65,90 @@ class IncidentDedup(Base):
     )
 
 
-class TenantConfig(Base):
-    __tablename__ = "tenant_config"
+class TenantPolicy(Base):
+    __tablename__ = "tenant_policy"
 
     tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
 
-    # Deployment (from training pipeline)
+    # Governance decisions (operator-defined)
+    min_acceptable_auc: Mapped[float] = mapped_column(Float, nullable=False, default=0.75)
+    max_acceptable_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    max_acceptable_missing_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.05)
+    daily_cost_budget: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    latency_sla_ms: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    risk_tolerance: Mapped[str] = mapped_column(String(32), nullable=False, default="standard")
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ModelValidationReport(Base):
+    __tablename__ = "model_validation_report"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    decision_threshold: Mapped[float] = mapped_column(Float, nullable=False)
-    last_training_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
-    # Baselines (measured once during validation)
-    baseline_auc: Mapped[float] = mapped_column(Float, nullable=False)
-    baseline_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    # Validation metrics (immutable, from training)
+    auc: Mapped[float] = mapped_column(Float, nullable=False)
+    precision: Mapped[float] = mapped_column(Float, nullable=False)
+    recall: Mapped[float] = mapped_column(Float, nullable=False)
+    f1_score: Mapped[float] = mapped_column(Float, nullable=False)
+    optimal_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    calibration_error: Mapped[float] = mapped_column(Float, nullable=False)
 
-    # Alert thresholds (derived from baselines + tolerance)
-    min_auc: Mapped[float] = mapped_column(Float, nullable=False)
-    max_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
-    max_missing_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
-    # Business constraints (operator-defined)
-    daily_cost_budget: Mapped[float] = mapped_column(Float, nullable=False)
-    latency_sla_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    __table_args__ = (
+        Index("idx_model_validation_tenant_version", "tenant_id", "model_version"),
+    )
+
+
+class RuntimeDeploymentProfile(Base):
+    __tablename__ = "runtime_deployment_profile"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Runtime characteristics (continuously updated from monitoring)
+    latency_p95_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    latency_p99_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    throughput_rps: Mapped[float] = mapped_column(Float, nullable=False)
+    memory_mb: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cpu_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    deployment_region: Mapped[str] = mapped_column(String(64), nullable=False, default="us-east-1")
+
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("idx_runtime_profile_tenant_ts", "tenant_id", "updated_at"),
+    )
+
+
+class TenantTierConfig(Base):
+    __tablename__ = "tenant_tier_config"
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tier: Mapped[str] = mapped_column(String(32), nullable=False, default="standard")
+
+    # Agent eligibility
+    threshold_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    retrain_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    rollback_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    fallback_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    datarepair_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Weight overrides
+    business_value_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.30)
+    confidence_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.20)
+    risk_inverse_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.20)
+    cost_efficiency_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)
+    time_inverse_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.05)
+    historical_success_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.15)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
