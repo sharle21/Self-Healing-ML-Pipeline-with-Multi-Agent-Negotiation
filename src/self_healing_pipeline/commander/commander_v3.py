@@ -7,7 +7,15 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from self_healing_pipeline.agents.remediation_policy import RemediationPolicyAgent
+from self_healing_pipeline.commander.reconciliation_langgraph import LangGraphReconciliation
+from self_healing_pipeline.db.models import (
+    IncidentHistory,
+    RemediationAction,
+    TenantConfig,
+)
 from self_healing_pipeline.gateway.events import Incident, IncidentType
 from self_healing_pipeline.observability import (
     SeverityCalculator,
@@ -32,6 +40,10 @@ class CommanderResultV3:
     reward: float
     incident_resolved: bool
     verification_breakdown: dict[str, Any]
+    reconciliation_triggered: bool = False
+    reconciliation_log: dict[str, Any] | None = None
+    escalation_triggered: bool = False
+    escalation_log: dict[str, Any] | None = None
 
 
 class CommanderV3:
@@ -42,19 +54,28 @@ class CommanderV3:
     3. Verification: Execute → measure outcome → calculate reward
     """
 
-    def __init__(self, agents: list[RemediationPolicyAgent], sonnet_model: str | None = None) -> None:
+    def __init__(
+        self,
+        agents: list[RemediationPolicyAgent],
+        sonnet_model: str | None = None,
+        db_session: Session | None = None,
+    ) -> None:
         """Initialize Commander V3.
 
         Args:
             agents: list of RemediationPolicyAgent instances
             sonnet_model: optional Sonnet model for LLM reconciliation
+            db_session: optional SQLAlchemy session for DB persistence
         """
         self.agents = agents
         self.sonnet_model = sonnet_model
+        self.db_session = db_session
         self.telemetry_collector = TelemetryCollector(use_mock=True)
         self.severity_calculator = SeverityCalculator()
         self.state_constructor = StateConstructor()
         self.reward_calculator = RewardCalculator()
+        self.reconciliation = LangGraphReconciliation(model_name=sonnet_model)
+        self.tenant_configs: dict[str, dict] = {}
 
     async def handle_incident(self, incident: Incident) -> CommanderResultV3:
         """Handle incident end-to-end: observe → decide → verify → reward.
@@ -78,6 +99,9 @@ class CommanderV3:
             f"(impact={severity_breakdown.impact:.2f}, "
             f"deviation={severity_breakdown.deviation:.2f})"
         )
+
+        # Store incident history
+        self._store_incident_history(incident, severity)
 
         # Layer 2: REMEDIATION (Decide)
         logger.info("[Decide] Getting agent recommendations...")
@@ -109,20 +133,77 @@ class CommanderV3:
         plans.sort(key=lambda x: x[1].confidence, reverse=True)
         winning_agent, winning_plan = plans[0]
 
+        # Check if reconciliation needed (close call)
+        reconciliation_triggered = False
+        reconciliation_log: dict[str, Any] | None = None
+        if len(plans) > 1 and self._needs_reconciliation(plans[0][1].confidence, plans[1][1].confidence):
+            logger.info(
+                f"[Decide] Reconciliation triggered "
+                f"(top 2 confidences: {plans[0][1].confidence:.3f}, {plans[1][1].confidence:.3f})"
+            )
+            reconciliation_triggered = True
+            # Reuse LangGraph for close calls
+            try:
+                result = await self.reconciliation.debate(
+                    plans[0][1], plans[1][1], incident  # type: ignore
+                )
+                reconciliation_log = {
+                    "winner_type": result.winner_type,
+                    "rationale": result.rationale,
+                    "confidence": result.confidence,
+                    "debate_log": result.debate_log,
+                }
+                winning_agent, winning_plan = next(
+                    (p for p in plans if p[0].agent_type == result.winner_type),
+                    plans[0],
+                )
+            except Exception as e:
+                logger.warning(f"Reconciliation failed: {e}, using top candidate")
+
         logger.info(
             f"[Decide] Winner: {winning_agent.agent_type} "
             f"(confidence={winning_plan.confidence:.3f})"
         )
 
-        # Layer 2b: EXECUTION (Run plan)
+        # Layer 2b: EXECUTION (Run plan with fallback)
         logger.info(f"[Execute] Running {winning_plan.action}...")
 
         execution_result = await winning_agent.execute(winning_plan)
+        execution_agent = winning_agent
+        fallback_attempts = []
+
+        # Fallback: try next best if winner fails
+        if not execution_result.success and len(plans) > 1:
+            logger.warning(
+                f"Winner {winning_agent.agent_type} failed: {execution_result}. Trying next best."
+            )
+            for agent, plan in plans[1:]:
+                execution_result = await agent.execute(plan)
+                fallback_attempts.append((agent.agent_type, plan.action, execution_result.success))
+                if execution_result.success:
+                    execution_agent = agent
+                    winning_plan = plan
+                    logger.info(f"Fallback succeeded with {agent.agent_type}")
+                    break
+
+        # Escalation: all agents failed
+        escalation_triggered = False
+        escalation_log: dict[str, Any] | None = None
+        if not execution_result.success:
+            escalation_triggered = True
+            escalation_log = {
+                "reason": f"All {len(plans)} agents failed",
+                "failed_attempts": fallback_attempts or [(winning_agent.agent_type, winning_plan.action)],
+            }
+            logger.error(f"Escalation: {escalation_log['reason']}")
 
         logger.info(
             f"[Execute] {winning_plan.action} completed "
             f"(success={execution_result.success}, duration={execution_result.duration:.1f}s)"
         )
+
+        # Store remediation action
+        self._store_remediation_action(incident, execution_agent, winning_plan, execution_result)
 
         # Layer 3: VERIFICATION (Measure & Reward)
         logger.info("[Verify] Collecting post-execution telemetry...")
@@ -140,7 +221,7 @@ class CommanderV3:
         }.get(incident.type, RewardCalculator.calculate_drift_reward)
 
         reward, reward_breakdown = reward_func(
-            telemetry_before, telemetry_after, winning_agent.agent_type, incident_resolved
+            telemetry_before, telemetry_after, execution_agent.agent_type, incident_resolved
         )
 
         logger.info(
@@ -154,13 +235,123 @@ class CommanderV3:
             incident_id=incident.id,
             incident_type=incident.type.value,
             severity=severity,
-            winning_agent_type=winning_agent.agent_type,
+            winning_agent_type=execution_agent.agent_type,
             winning_plan=asdict(winning_plan) if hasattr(winning_plan, '__dataclass_fields__') else vars(winning_plan),
             execution_result=asdict(execution_result) if hasattr(execution_result, '__dataclass_fields__') else vars(execution_result),
             reward=reward,
             incident_resolved=incident_resolved,
             verification_breakdown=asdict(reward_breakdown),
+            reconciliation_triggered=reconciliation_triggered,
+            reconciliation_log=reconciliation_log,
+            escalation_triggered=escalation_triggered,
+            escalation_log=escalation_log,
         )
+
+    def _needs_reconciliation(self, top_confidence: float, second_confidence: float) -> bool:
+        """Check if top 2 agents are close enough to warrant reconciliation.
+
+        Args:
+            top_confidence: winning agent confidence
+            second_confidence: runner-up confidence
+
+        Returns:
+            True if margin < 10%
+        """
+        if top_confidence == 0:
+            return False
+        margin = abs(top_confidence - second_confidence) / top_confidence
+        return margin < 0.10
+
+    def _store_incident_history(self, incident: Incident, severity: float) -> None:
+        """Store incident in DB for meta-harness learning.
+
+        Args:
+            incident: the incident
+            severity: calculated severity
+        """
+        if not self.db_session:
+            return
+
+        history = IncidentHistory(
+            incident_id=incident.id,
+            tenant_id=incident.tenant_id,
+            incident_type=incident.type.value,
+            severity=severity,
+            payload=incident.payload or {},
+        )
+        self.db_session.add(history)
+        self.db_session.commit()
+
+    def _store_remediation_action(
+        self,
+        incident: Incident,
+        agent: RemediationPolicyAgent,
+        plan: Any,
+        execution_result: Any,
+    ) -> None:
+        """Store remediation action for audit trail.
+
+        Args:
+            incident: the incident
+            agent: agent that executed
+            plan: remediation plan
+            execution_result: execution result
+        """
+        if not self.db_session:
+            return
+
+        action = RemediationAction(
+            incident_id=incident.id,
+            tenant_id=incident.tenant_id,
+            agent_type=agent.agent_type,
+            action=plan.action,
+            confidence=plan.confidence,
+            execution_time=execution_result.duration,
+        )
+        self.db_session.add(action)
+        self.db_session.commit()
+
+    def _load_tenant_config(self, tenant_id: str) -> dict[str, Any]:
+        """Load tenant-specific thresholds from DB.
+
+        Args:
+            tenant_id: tenant identifier
+
+        Returns:
+            config dict with thresholds
+        """
+        if tenant_id in self.tenant_configs:
+            return self.tenant_configs[tenant_id]
+
+        if not self.db_session:
+            return self._default_tenant_config()
+
+        config_row = self.db_session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
+        if config_row:
+            config = {
+                "auc_threshold": config_row.auc_threshold,
+                "latency_threshold": config_row.latency_threshold,
+                "cost_threshold": config_row.cost_threshold,
+                "missing_rate_threshold": config_row.missing_rate_threshold,
+            }
+        else:
+            config = self._default_tenant_config()
+            # Store default for future
+            config_row = TenantConfig(tenant_id=tenant_id, **config)
+            self.db_session.add(config_row)
+            self.db_session.commit()
+
+        self.tenant_configs[tenant_id] = config
+        return config
+
+    def _default_tenant_config(self) -> dict[str, Any]:
+        """Return default tenant config."""
+        return {
+            "auc_threshold": 0.75,
+            "latency_threshold": 100.0,
+            "cost_threshold": 0.10,
+            "missing_rate_threshold": 0.05,
+        }
 
     def _get_agent_state(self, incident_type: IncidentType, telemetry: Any) -> dict[str, Any]:
         """Construct appropriate state dict for agents based on incident type.
