@@ -89,9 +89,23 @@ class CommanderV3:
         # Layer 1: OBSERVATION
         logger.info(f"[Observe] Incident {incident.id} type={incident.type.value}")
 
+        # Load tenant config for severity calculation
+        tenant_config = self._load_tenant_config(incident.tenant_id)
+        tenant_config_dict = None
+        if tenant_config:
+            tenant_config_dict = {
+                "baseline_auc": tenant_config.baseline_auc,
+                "min_auc": tenant_config.min_auc,
+                "baseline_latency_ms": tenant_config.baseline_latency_ms,
+                "max_latency_ms": tenant_config.max_latency_ms,
+                "max_missing_rate": tenant_config.max_missing_rate,
+                "latency_sla_ms": tenant_config.latency_sla_ms,
+                "daily_cost_budget": tenant_config.daily_cost_budget,
+            }
+
         telemetry_before = self.telemetry_collector.collect()
         severity, severity_breakdown = self.severity_calculator.calculate(
-            incident.type, telemetry_before
+            incident.type, telemetry_before, tenant_config=tenant_config_dict
         )
 
         logger.info(
