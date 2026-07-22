@@ -42,8 +42,10 @@ class TestFullIntegrationLoop:
             DataRepairAgent("datarepair-1"),
         ]
 
-        # Create DB session
-        Base.metadata.create_all(get_engine())
+        # Create DB session (drop first to ensure clean state between runs)
+        engine = get_engine()
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
         for session in session_scope():
             # Initialize tenant with realistic metrics
             validation_metrics = ValidationMetrics(
