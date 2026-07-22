@@ -13,8 +13,23 @@ from pydantic import BaseModel
 
 from self_healing_pipeline.config import get_settings
 from self_healing_pipeline.observability.metrics import (
+    cost_per_prediction,
+    data_duplicate_rate,
+    data_missing_rate,
+    data_schema_violations,
+    false_negative_rate,
+    false_positive_rate,
+    feature_drift_score,
+    model_auc,
+    model_calibration_error,
+    model_drift_percentage,
+    model_error_rate,
+    model_precision,
+    model_recall,
     prediction_count,
     prediction_latency,
+    system_latency_p95,
+    system_latency_p99,
 )
 from self_healing_pipeline.pipeline.serving import ModelServer
 
@@ -246,6 +261,47 @@ def agent_summary() -> AgentSummaryResponse:
         )
 
     return AgentSummaryResponse(agents=agents, timestamp=datetime.now(UTC).isoformat())
+
+
+class ModelQualityUpdate(BaseModel):
+    tenant_id: str
+    auc: float
+    precision: float
+    recall: float
+    error_rate: float
+    calibration_error: float
+    missing_rate: float
+    duplicate_rate: float
+    schema_violations: int
+    latency_p95_ms: float
+    latency_p99_ms: float
+    cost_per_prediction: float = 0.0
+    false_positive_rate: float = 0.0
+    false_negative_rate: float = 0.0
+    drift_percentage: float = 0.0
+    feature_drift: dict[str, float] = {}
+
+
+@app.post("/internal/metrics/update", status_code=204)
+def update_model_metrics(body: ModelQualityUpdate) -> None:
+    """Update model quality Gauges from replay script (has ground truth labels)."""
+    tid = body.tenant_id
+    model_auc.labels(tenant_id=tid).set(body.auc)
+    model_precision.labels(tenant_id=tid).set(body.precision)
+    model_recall.labels(tenant_id=tid).set(body.recall)
+    model_error_rate.labels(tenant_id=tid).set(body.error_rate)
+    model_calibration_error.labels(tenant_id=tid).set(body.calibration_error)
+    data_missing_rate.labels(tenant_id=tid).set(body.missing_rate)
+    data_duplicate_rate.labels(tenant_id=tid).set(body.duplicate_rate)
+    data_schema_violations.labels(tenant_id=tid).set(body.schema_violations)
+    system_latency_p95.labels(tenant_id=tid).set(body.latency_p95_ms)
+    system_latency_p99.labels(tenant_id=tid).set(body.latency_p99_ms)
+    cost_per_prediction.labels(tenant_id=tid).set(body.cost_per_prediction)
+    false_positive_rate.labels(tenant_id=tid).set(body.false_positive_rate)
+    false_negative_rate.labels(tenant_id=tid).set(body.false_negative_rate)
+    model_drift_percentage.labels(tenant_id=tid).set(body.drift_percentage)
+    for feat, score in body.feature_drift.items():
+        feature_drift_score.labels(tenant_id=tid, feature=feat).set(score)
 
 
 @app.get("/metrics")
