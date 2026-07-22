@@ -20,8 +20,9 @@ from self_healing_pipeline.db.models import (
     TenantTierConfig,
 )
 from self_healing_pipeline.observability.metrics import (
-    incident_count,
+    agent_proposal_count,
     agent_win_count,
+    incident_count,
     prediction_latency,
 )
 from self_healing_pipeline.gateway.events import Incident, IncidentType
@@ -135,7 +136,7 @@ class CommanderV3:
         # Layer 2: REMEDIATION (Decide)
         logger.info("[Decide] Getting agent recommendations...")
 
-        eligible_agents = [a for a in self.agents if a.can_handle(self._get_agent_state(incident.type, telemetry_before))]
+        eligible_agents = [a for a in self.agents if a.can_handle(self._get_agent_state(incident.type, telemetry_before, incident.payload))]
 
         if not eligible_agents:
             logger.error(f"No eligible agents for {incident.type.value}")
@@ -154,9 +155,11 @@ class CommanderV3:
         # Get plans from all eligible agents
         plans = []
         for agent in eligible_agents:
-            state = self._get_agent_state(incident.type, telemetry_before)
+            state = self._get_agent_state(incident.type, telemetry_before, incident.payload)
             plan = await agent.analyze(state)
             plans.append((agent, plan))
+            # Record every proposal (not just the winner)
+            agent_proposal_count.labels(agent_type=agent.agent_type).inc()
 
         # Sort by confidence
         plans.sort(key=lambda x: x[1].confidence, reverse=True)
@@ -414,38 +417,30 @@ class CommanderV3:
             return None
         return self.db_session.query(TenantTierConfig).filter_by(tenant_id=tenant_id).first()
 
-    def _get_agent_state(self, incident_type: IncidentType, telemetry: Any) -> dict[str, Any]:
-        """Construct appropriate state dict for agents based on incident type.
-
-        Args:
-            incident_type: type of incident
-            telemetry: current telemetry snapshot
-
-        Returns:
-            Agent-specific state dict
-        """
+    def _get_agent_state(
+        self, incident_type: IncidentType, telemetry: Any, payload: dict | None = None
+    ) -> dict[str, Any]:
+        """Construct agent state from telemetry, overriding with live incident payload values."""
         if incident_type == IncidentType.DRIFT:
-            # For drift, provide retrain/threshold/rollback state
             state = self.state_constructor.retrain_state(telemetry).to_dict()
             state.update(self.state_constructor.threshold_state(telemetry).to_dict())
-            return state
         elif incident_type == IncidentType.DATA_QUALITY:
-            # For data quality, provide datarepair/fallback state
             state = self.state_constructor.datarepair_state(telemetry).to_dict()
             state.update(self.state_constructor.fallback_state(telemetry).to_dict())
-            return state
         elif incident_type == IncidentType.LATENCY_BREACH:
-            # For latency, provide threshold/fallback/rollback state
             state = self.state_constructor.threshold_state(telemetry).to_dict()
             state.update(self.state_constructor.fallback_state(telemetry).to_dict())
-            return state
         elif incident_type == IncidentType.COST_THRESHOLD:
-            # For cost, provide threshold/fallback state
             state = self.state_constructor.threshold_state(telemetry).to_dict()
             state.update(self.state_constructor.fallback_state(telemetry).to_dict())
-            return state
         else:
-            return {}
+            state = {}
+
+        # Override with real values from incident payload (beats mock telemetry)
+        if payload:
+            state.update({k: v for k, v in payload.items() if v is not None})
+
+        return state
 
     def _check_incident_resolved(
         self, incident_type: IncidentType, telemetry_before: Any, telemetry_after: Any
