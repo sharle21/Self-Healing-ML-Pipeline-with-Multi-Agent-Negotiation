@@ -5,19 +5,54 @@ import pandas as pd
 from ucimlrepo import fetch_ucirepo
 
 UCI_CREDIT_DEFAULT_ID = 350
-TARGET_COL = "default payment next month"
 LABEL_COL = "y"
 TENANT_COL = "tenant_id"
 TIER_STANDARD = "standard"
 TIER_ENTERPRISE = "enterprise"
 TIER_FREE = "free"
 
+# X1-X23 column mapping for UCI Default of Credit Card Clients (ID=350)
+_UCI_RENAME = {
+    "X1": "LIMIT_BAL",
+    "X2": "SEX",
+    "X3": "EDUCATION",
+    "X4": "MARRIAGE",
+    "X5": "AGE",
+    "X6": "PAY_0",
+    "X7": "PAY_2",
+    "X8": "PAY_3",
+    "X9": "PAY_4",
+    "X10": "PAY_5",
+    "X11": "PAY_6",
+    "X12": "BILL_AMT1",
+    "X13": "BILL_AMT2",
+    "X14": "BILL_AMT3",
+    "X15": "BILL_AMT4",
+    "X16": "BILL_AMT5",
+    "X17": "BILL_AMT6",
+    "X18": "PAY_AMT1",
+    "X19": "PAY_AMT2",
+    "X20": "PAY_AMT3",
+    "X21": "PAY_AMT4",
+    "X22": "PAY_AMT5",
+    "X23": "PAY_AMT6",
+    "Y": LABEL_COL,
+}
+
 
 def fetch_uci_credit_default() -> pd.DataFrame:
     bundle = fetch_ucirepo(id=UCI_CREDIT_DEFAULT_ID)
     features = bundle.data.features.copy()
     targets = bundle.data.targets.copy()
-    features[LABEL_COL] = targets[TARGET_COL].astype(int).to_numpy()
+
+    # UCI lib returns X1-X23 / Y; rename to domain column names
+    if "X1" in features.columns:
+        features = features.rename(columns=_UCI_RENAME)
+    if "Y" in targets.columns:
+        targets = targets.rename(columns={"Y": LABEL_COL})
+
+    label_col = LABEL_COL if LABEL_COL in targets.columns else targets.columns[0]
+    features[LABEL_COL] = targets[label_col].astype(int).to_numpy()
     return features
 
 
