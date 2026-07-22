@@ -193,9 +193,9 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "increase(agent_wins_total[24h]) / increase(agent_proposals_total[24h])",
+          "expr": "sum(increase(agent_wins_total[24h])) / clamp_min(sum(increase(agent_proposals_total[24h])), 1)",
           "interval": "",
-          "legendFormat": "Avg Agent Win Rate",
+          "legendFormat": "Overall Win Rate",
           "refId": "A"
         }
       ],
@@ -273,7 +273,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "increase(agent_wins_total[5m]) / (increase(agent_wins_total[5m]) + clamp_min(increase(agent_proposals_total[5m]) - increase(agent_wins_total[5m]), 1))",
+          "expr": "increase(agent_wins_total[5m]) / clamp_min(increase(agent_proposals_total[5m]), 1)",
           "legendFormat": "{{agent_type}}",
           "refId": "A"
         }

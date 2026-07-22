@@ -8,4 +8,4 @@ providers:
     disableDeletion: false
     editable: true
     options:
-      path: /etc/grafana/provisioning/dashboards
+      path: /Users/sharvari/Self-Healing-ML-Pipeline-with-Multi-Agent-Negotiation/docker/grafana/provisioning/dashboards

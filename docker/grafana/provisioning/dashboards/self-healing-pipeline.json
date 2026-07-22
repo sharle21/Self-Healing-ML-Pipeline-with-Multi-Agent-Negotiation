@@ -23,126 +23,107 @@
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            }
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "pieType": "pie"
-      },
-      "pluginVersion": "8.0.0",
-      "targets": [
-        {
-          "expr": "rate(predictions_total[5m])",
-          "interval": "",
-          "legendFormat": "{{tenant_id}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Prediction Rate by Tenant",
-      "type": "piechart"
-    },
-    {
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
             "axisLabel": "",
             "axisPlacement": "auto",
-            "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
             "showPoints": "auto",
             "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "stacking": { "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.7 },
+              { "color": "green", "value": 0.75 }
             ]
-          }
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 4,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 10,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
+        "legend": { "calcs": ["last", "min", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
       },
-      "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "rate(incidents_total[5m])",
-          "interval": "",
-          "legendFormat": "{{tenant_id}} - {{type}}",
+          "expr": "model_auc",
+          "legendFormat": "{{tenant_id}}",
           "refId": "A"
         }
       ],
-      "title": "Incident Rate",
+      "title": "Model AUC by Tenant (rolling 200-row window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1.0 },
+              { "color": "red", "value": 2.0 }
+            ]
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 11,
+      "options": {
+        "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "feature_drift_score{feature=\"LIMIT_BAL\"}",
+          "legendFormat": "LIMIT_BAL · {{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "expr": "feature_drift_score{feature=\"AGE\"}",
+          "legendFormat": "AGE · {{tenant_id}}",
+          "refId": "B"
+        },
+        {
+          "expr": "feature_drift_score{feature=\"BILL_AMT1\"}",
+          "legendFormat": "BILL_AMT1 · {{tenant_id}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Feature Drift Score (σ from tenant baseline — >2 = alert)",
       "type": "timeseries"
     },
     {
@@ -156,120 +137,245 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 100
-              }
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1.0 },
+              { "color": "red", "value": 2.0 }
             ]
-          }
+          },
+          "unit": "short",
+          "min": 0,
+          "max": 5
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 6,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 12,
       "options": {
         "orientation": "auto",
         "reduceOptions": {
-          "values": false,
+          "calcs": ["lastNotNull"],
           "fields": "",
-          "calcs": [
-            "lastNotNull"
-          ]
+          "values": false
         },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "text": {}
       },
-      "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "cost_per_prediction",
-          "interval": "",
+          "expr": "feature_drift_score{feature=\"LIMIT_BAL\"}",
           "legendFormat": "{{tenant_id}}",
           "refId": "A"
         }
       ],
-      "title": "Cost Per Prediction",
+      "title": "LIMIT_BAL Drift Score by Tenant (current)",
       "type": "gauge"
     },
     {
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
-            "axisLabel": "",
+            "axisLabel": "ms",
             "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "bars",
-            "fillOpacity": 100,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 200 }
             ]
+          },
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 13,
+      "options": {
+        "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "system_latency_p95_ms",
+          "legendFormat": "p95 · {{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "expr": "system_latency_p99_ms",
+          "legendFormat": "p99 · {{tenant_id}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Prediction Latency p95 / p99 by Tenant",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.15 }
+            ]
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 14,
+      "options": {
+        "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "data_missing_rate",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Missing Feature Rate by Tenant (>15% = incident)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "hideFrom": { "tooltip": false, "viz": false, "legend": false }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "pieType": "pie"
+      },
+      "targets": [
+        {
+          "expr": "rate(predictions_total[5m])",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Prediction Rate by Tenant",
+      "type": "piechart"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 80 }]
           }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
       },
+      "targets": [
+        {
+          "expr": "rate(incidents_total[5m])",
+          "legendFormat": "{{tenant_id}} - {{type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Incident Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
       "id": 8,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
       },
-      "pluginVersion": "8.0.0",
       "targets": [
         {
           "expr": "increase(agent_wins_total[5m])",
-          "interval": "",
           "legendFormat": "{{agent_type}}",
           "refId": "A"
         }
@@ -278,17 +384,12 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "30s",
+  "refresh": "15s",
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "",
   "title": "Self-Healing ML Pipeline",
