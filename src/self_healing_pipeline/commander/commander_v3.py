@@ -27,11 +27,14 @@ from self_healing_pipeline.observability.metrics import (
 )
 from self_healing_pipeline.gateway.events import Incident, IncidentType
 from self_healing_pipeline.observability import (
+    IncidentStateBuilder,
     SeverityCalculator,
     StateConstructor,
     TelemetryCollector,
 )
+from self_healing_pipeline.commander.utility import UtilityScorer, UtilityWeights
 from self_healing_pipeline.verification import RewardCalculator
+from self_healing_pipeline.verification.reward import OutcomeReward
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ class CommanderResultV3:
     reward: float
     incident_resolved: bool
     verification_breakdown: dict[str, Any]
+    utility_score: float = 0.0             # Phase 11: pre-execution utility estimate
     reconciliation_triggered: bool = False
     reconciliation_log: dict[str, Any] | None = None
     escalation_triggered: bool = False
@@ -68,6 +72,9 @@ class CommanderV3:
         agents: list[RemediationPolicyAgent],
         sonnet_model: str | None = None,
         db_session: Session | None = None,
+        session_factory: Any | None = None,
+        use_mock_telemetry: bool = True,
+        stabilization_seconds: float = 0.0,
     ) -> None:
         """Initialize Commander V3.
 
@@ -75,16 +82,24 @@ class CommanderV3:
             agents: list of RemediationPolicyAgent instances
             sonnet_model: optional Sonnet model for LLM reconciliation
             db_session: optional SQLAlchemy session for DB persistence
+            session_factory: optional SQLAlchemy session factory for IncidentStateBuilder
+            use_mock_telemetry: if True, TelemetryCollector uses mock data (for testing)
+            stabilization_seconds: seconds to wait after execution before sampling post-action
+                metrics. 0 in tests; 10-30 in production to let Prometheus gauges update.
         """
         self.agents = agents
         self.sonnet_model = sonnet_model
         self.db_session = db_session
-        self.telemetry_collector = TelemetryCollector(use_mock=True)
+        self.telemetry_collector = TelemetryCollector(use_mock=use_mock_telemetry)
         self.severity_calculator = SeverityCalculator()
         self.state_constructor = StateConstructor()
         self.reward_calculator = RewardCalculator()
         self.reconciliation = LangGraphReconciliation(model_name=sonnet_model)
         self.tenant_configs: dict[str, dict] = {}
+        self.stabilization_seconds = stabilization_seconds
+        self.incident_state_builder = IncidentStateBuilder(
+            self.telemetry_collector, session_factory=session_factory
+        )
 
     async def handle_incident(self, incident: Incident) -> CommanderResultV3:
         """Handle incident end-to-end: observe → decide → verify → reward.
@@ -124,19 +139,24 @@ class CommanderV3:
             incident.type, telemetry_before, tenant_config=severity_config
         )
 
-        logger.info(
-            f"[Observe] Severity={severity:.3f} "
-            f"(impact={severity_breakdown.impact:.2f}, "
-            f"deviation={severity_breakdown.deviation:.2f})"
-        )
+        comp_str = " ".join(f"{k}={v:.2f}" for k, v in severity_breakdown.components.items())
+        logger.info("[Observe] Severity=%.3f (%s)", severity, comp_str)
 
         # Store incident history
         self._store_incident_history(incident, severity)
 
+        # Build IncidentState: real values from Prometheus + DB
+        incident_state = self.incident_state_builder.build(
+            incident.tenant_id, incident.type.value
+        )
+
         # Layer 2: REMEDIATION (Decide)
         logger.info("[Decide] Getting agent recommendations...")
 
-        eligible_agents = [a for a in self.agents if a.can_handle(self._get_agent_state(incident.type, telemetry_before, incident.payload))]
+        eligible_agents = [
+            a for a in self.agents
+            if a.can_handle(self._get_agent_state_v2(incident.type, incident_state, incident.payload))
+        ]
 
         if not eligible_agents:
             logger.error(f"No eligible agents for {incident.type.value}")
@@ -155,29 +175,40 @@ class CommanderV3:
         # Get plans from all eligible agents
         plans = []
         for agent in eligible_agents:
-            state = self._get_agent_state(incident.type, telemetry_before, incident.payload)
+            state = self._get_agent_state_v2(incident.type, incident_state, incident.payload)
             plan = await agent.analyze(state)
             plans.append((agent, plan))
             # Record every proposal (not just the winner)
             agent_proposal_count.labels(agent_type=agent.agent_type).inc()
 
-        # Sort by confidence
-        plans.sort(key=lambda x: x[1].confidence, reverse=True)
-        winning_agent, winning_plan = plans[0]
+        # Phase 11: Sort by utility score (not raw confidence)
+        tier_config = self._load_tenant_tier_config(incident.tenant_id)
+        utility_weights = UtilityScorer.weights_from_tier_config(tier_config, incident_state.incident_type)
+        ranked = UtilityScorer.rank(plans, incident_state, utility_weights)
 
-        # Check if reconciliation needed (close call)
+        for agent, plan, u in ranked:
+            logger.info(
+                "[Decide] Agent=%s utility=%.3f confidence=%.3f",
+                agent.agent_type, u, plan.confidence,
+            )
+
+        winning_agent, winning_plan, winning_utility = ranked[0]
+        plans = [(a, p) for a, p, _ in ranked]  # keep sorted order for fallback loop
+
+        # Check if reconciliation needed (close utility scores → close call)
         reconciliation_triggered = False
         reconciliation_log: dict[str, Any] | None = None
-        if len(plans) > 1 and self._needs_reconciliation(plans[0][1].confidence, plans[1][1].confidence):
+        if len(ranked) > 1 and self._needs_reconciliation(ranked[0][2], ranked[1][2]):
             logger.info(
-                f"[Decide] Reconciliation triggered "
-                f"(top 2 confidences: {plans[0][1].confidence:.3f}, {plans[1][1].confidence:.3f})"
+                "[Decide] Reconciliation triggered "
+                "(top 2 utilities: %.3f, %.3f)",
+                ranked[0][2], ranked[1][2],
             )
             reconciliation_triggered = True
             # Reuse LangGraph for close calls
             try:
                 result = await self.reconciliation.debate(
-                    plans[0][1], plans[1][1], incident  # type: ignore
+                    ranked[0][1], ranked[1][1], incident  # type: ignore
                 )
                 reconciliation_log = {
                     "winner_type": result.winner_type,
@@ -186,15 +217,15 @@ class CommanderV3:
                     "debate_log": result.debate_log,
                 }
                 winning_agent, winning_plan = next(
-                    (p for p in plans if p[0].agent_type == result.winner_type),
-                    plans[0],
+                    ((a, p) for a, p in plans if a.agent_type == result.winner_type),
+                    (winning_agent, winning_plan),
                 )
             except Exception as e:
                 logger.warning(f"Reconciliation failed: {e}, using top candidate")
 
         logger.info(
-            f"[Decide] Winner: {winning_agent.agent_type} "
-            f"(confidence={winning_plan.confidence:.3f})"
+            "[Decide] Winner: %s (utility=%.3f confidence=%.3f)",
+            winning_agent.agent_type, winning_utility, winning_plan.confidence,
         )
 
         # Record agent win
@@ -244,33 +275,47 @@ class CommanderV3:
         )
 
         # Layer 3: VERIFICATION (Measure & Reward)
-        logger.info("[Verify] Collecting post-execution telemetry...")
+        logger.info("[Verify] Waiting %.1fs for metrics to stabilize...", self.stabilization_seconds)
 
-        telemetry_after = self.telemetry_collector.collect()
+        if self.stabilization_seconds > 0:
+            import asyncio
+            await asyncio.sleep(self.stabilization_seconds)
 
-        # Calculate reward based on incident type
-        incident_resolved = self._check_incident_resolved(incident.type, telemetry_before, telemetry_after)
-
-        reward_func = {
-            IncidentType.DRIFT: RewardCalculator.calculate_drift_reward,
-            IncidentType.DATA_QUALITY: RewardCalculator.calculate_data_quality_reward,
-            IncidentType.LATENCY_BREACH: RewardCalculator.calculate_latency_reward,
-            IncidentType.COST_THRESHOLD: RewardCalculator.calculate_cost_reward,
-        }.get(incident.type, RewardCalculator.calculate_drift_reward)
-
-        reward, reward_breakdown = reward_func(
-            telemetry_before, telemetry_after, execution_agent.agent_type, incident_resolved
+        # Rebuild IncidentState from Prometheus to get post-action metrics
+        incident_state_after = self.incident_state_builder.build(
+            incident.tenant_id, incident.type.value
         )
 
+        # Outcome-based reward: real before/after deltas, not agent estimates
+        reward, outcome_breakdown = RewardCalculator.calculate_from_incident_states(
+            incident_state, incident_state_after, execution_agent.agent_type, execution_result
+        )
+        incident_resolved = outcome_breakdown.resolution_score > 0.5
+
         logger.info(
-            f"[Verify] Reward={reward:.3f} "
-            f"(resolved={incident_resolved}, "
-            f"metric_improvement={reward_breakdown.metric_improvement:.2f}, "
-            f"cost_efficiency={reward_breakdown.cost_efficiency:.2f})"
+            "[Verify] Reward=%.3f resolved=%s "
+            "(quality_gain=%.2f cost_gain=%.2f reliability_gain=%.2f latency_gain=%.2f)",
+            reward, incident_resolved,
+            outcome_breakdown.quality_gain, outcome_breakdown.cost_gain,
+            outcome_breakdown.reliability_gain, outcome_breakdown.latency_gain,
         )
 
         # Store remediation action with reward
         self._store_remediation_action(incident, execution_agent, winning_plan, execution_result, reward)
+
+        verification_breakdown = {
+            "quality_gain": outcome_breakdown.quality_gain,
+            "cost_gain": outcome_breakdown.cost_gain,
+            "reliability_gain": outcome_breakdown.reliability_gain,
+            "latency_gain": outcome_breakdown.latency_gain,
+            "resolution_score": outcome_breakdown.resolution_score,
+            "exec_cost_penalty": outcome_breakdown.exec_cost_penalty,
+            "time_penalty": outcome_breakdown.time_penalty,
+            "regression_penalty": outcome_breakdown.regression_penalty,
+            "auc_before": outcome_breakdown.auc_before,
+            "auc_after": outcome_breakdown.auc_after,
+            "reward": reward,
+        }
 
         return CommanderResultV3(
             incident_id=incident.id,
@@ -281,7 +326,8 @@ class CommanderV3:
             execution_result=asdict(execution_result) if hasattr(execution_result, '__dataclass_fields__') else vars(execution_result),
             reward=reward,
             incident_resolved=incident_resolved,
-            verification_breakdown=asdict(reward_breakdown),
+            verification_breakdown=verification_breakdown,
+            utility_score=winning_utility,
             reconciliation_triggered=reconciliation_triggered,
             reconciliation_log=reconciliation_log,
             escalation_triggered=escalation_triggered,
@@ -439,6 +485,41 @@ class CommanderV3:
         # Override with real values from incident payload (beats mock telemetry)
         if payload:
             state.update({k: v for k, v in payload.items() if v is not None})
+
+        return state
+
+    def _get_agent_state_v2(
+        self, incident_type: IncidentType, incident_state: Any, payload: dict | None = None
+    ) -> dict[str, Any]:
+        """Construct agent state from IncidentState (data-driven, no hardcoded constants).
+
+        Merges all relevant per-agent state fields into a single dict so every
+        agent sees the full picture and can decide whether it can_handle().
+        """
+        sc = self.state_constructor
+
+        if incident_type == IncidentType.DRIFT:
+            state = sc.retrain_state_from_incident(incident_state).to_dict()
+            state.update(sc.threshold_state_from_incident(incident_state).to_dict())
+            state.update(sc.rollback_state_from_incident(incident_state).to_dict())
+        elif incident_type == IncidentType.DATA_QUALITY:
+            state = sc.datarepair_state_from_incident(incident_state).to_dict()
+            state.update(sc.fallback_state_from_incident(incident_state).to_dict())
+        elif incident_type == IncidentType.LATENCY_BREACH:
+            state = sc.threshold_state_from_incident(incident_state).to_dict()
+            state.update(sc.fallback_state_from_incident(incident_state).to_dict())
+        elif incident_type == IncidentType.COST_THRESHOLD:
+            state = sc.threshold_state_from_incident(incident_state).to_dict()
+            state.update(sc.fallback_state_from_incident(incident_state).to_dict())
+        else:
+            state = {}
+
+        # Incident payload values always win (most specific signal)
+        if payload:
+            state.update({k: v for k, v in payload.items() if v is not None})
+
+        # Always inject tenant_id so agents can write to the correct DB row
+        state["tenant_id"] = incident_state.tenant_id
 
         return state
 
