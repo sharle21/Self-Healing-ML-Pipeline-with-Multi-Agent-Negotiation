@@ -372,6 +372,14 @@ def _select(policy: str, plans: list[tuple], state: IncidentState) -> str | None
     if policy == "highest_confidence":
         return max(plans, key=lambda x: x[1].confidence)[0].agent_type
 
+    if policy == "cheapest_eligible":
+        def _dollar_cost(plan) -> float:
+            try:
+                return float(plan.cost.lstrip("$"))
+            except ValueError:
+                return float("inf")
+        return min(plans, key=lambda x: _dollar_cost(x[1]))[0].agent_type
+
     raise ValueError(f"Unknown policy: {policy}")
 
 
@@ -396,7 +404,7 @@ class TrialResult:
 # Evaluation engine
 # ---------------------------------------------------------------------------
 
-POLICIES = ["adaptive_commander", "always_retrain", "fixed_priority", "highest_confidence"]
+POLICIES = ["adaptive_commander", "always_retrain", "fixed_priority", "highest_confidence", "cheapest_eligible"]
 
 
 async def _run_trial(scenario: Scenario, policy: str) -> TrialResult:
@@ -478,7 +486,7 @@ def aggregate(results: list[TrialResult]) -> dict[str, PolicyMetrics]:
 
 
 def print_comparison_table(metrics: dict[str, PolicyMetrics]) -> None:
-    policy_order = ["adaptive_commander", "always_retrain", "fixed_priority", "highest_confidence"]
+    policy_order = ["adaptive_commander", "always_retrain", "fixed_priority", "highest_confidence", "cheapest_eligible"]
     header = f"{'Policy':<22} {'Resolution':>10} {'Mean Reward':>12} {'Unnec Retrain':>14} {'Guardrail Viol':>15}"
     print(header)
     print("-" * len(header))
