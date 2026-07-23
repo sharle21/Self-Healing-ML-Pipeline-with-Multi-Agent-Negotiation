@@ -44,44 +44,47 @@ class FallbackAgent(RemediationPolicyAgent):
         fallback_quality = state.get("fallback_quality", 0.70)
         historical_success = state.get("historical_fallback_success", 0.85)
 
-        # Compute confidence from state
+        # Phase 10: latency ratio (vs assumed 100ms SLA) drives urgency
+        latency_sla_ms = 100.0
+        latency_ratio_norm = min(latency_p95 / latency_sla_ms - 1.0, 1.0) if latency_p95 > latency_sla_ms else 0.0
+
         state_features = {
-            "error_severity": min(error_rate / 0.25, 1.0),  # High error = fallback needed
-            "latency_critical": min(latency_p95 / 1000, 1.0),  # P95 > 1s = critical
-            "data_quality_issue": min(missing_rate / 0.50, 1.0),  # Missing data = fallback
-            "model_confidence_low": 1.0 - min(confidence_mean, 1.0),  # Low confidence = fallback
-            "fallback_availability": fallback_quality,  # Quality of fallback option
+            "error_severity": min(error_rate / 0.25, 1.0),
+            "latency_breach_ratio": max(0.0, latency_ratio_norm),
+            "data_quality_issue": min(missing_rate / 0.50, 1.0),
+            "model_confidence_low": 1.0 - min(confidence_mean, 1.0),
+            "fallback_availability": fallback_quality,
             "historical_success": historical_success,
         }
-
         weights = {
             "error_severity": 0.25,
-            "latency_critical": 0.25,
+            "latency_breach_ratio": 0.25,
             "data_quality_issue": 0.20,
             "model_confidence_low": 0.15,
             "fallback_availability": 0.10,
             "historical_success": 0.05,
         }
-
         confidence = self._compute_confidence_from_state(state_features, weights)
 
+        accuracy_loss_pct = (1.0 - fallback_quality) * 100
         return RemediationPlan(
             agent_type=self.agent_type,
             action="activate_fallback",
             confidence=confidence,
             expected_effect={
-                "availability": "+15%",  # Fallback is always available
-                "accuracy_change": f"-{(1 - fallback_quality) * 100:.0f}%",  # Degraded but stable
-                "latency_change": -latency_p95,  # Fallback is fast
+                "auc_delta": -(1.0 - fallback_quality) * 0.10,
+                "latency_p95_delta_ms": -max(0.0, latency_p95 - latency_sla_ms),
+                "cost_delta_usd": 0.0,
+                "availability_delta": 0.15,
             },
             reasoning=(
-                f"Model unreliable (error={error_rate:.2f}, latency={latency_p95:.0f}ms, "
-                f"missing={missing_rate:.2f}, confidence={confidence_mean:.2f}) → "
-                f"activate fallback (quality={fallback_quality:.2f}) to maintain availability"
+                f"error={error_rate:.2f} latency={latency_p95:.0f}ms "
+                f"({latency_p95/latency_sla_ms:.1f}x SLA) missing={missing_rate:.2f} "
+                f"→ fallback (quality={fallback_quality:.2f}, -{accuracy_loss_pct:.0f}% accuracy)"
             ),
             cost="$0.10",
             execution_time="2 seconds",
-            risk=0.15,  # Risk is accuracy loss, not system crash
+            risk=0.15,
         )
 
     async def execute(self, plan: RemediationPlan) -> Any:

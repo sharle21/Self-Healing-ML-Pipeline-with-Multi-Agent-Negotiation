@@ -44,50 +44,51 @@ class DataRepairAgent(RemediationPolicyAgent):
         pipeline_health = state.get("data_pipeline_health", 0.55)
         historical_success = state.get("historical_repair_success", 0.70)
 
-        # Compute confidence from state
-        missing_severity = min(missing_rate / 0.50, 1.0)  # 50% missing = catastrophic
+        # Phase 10: weight all three data quality dimensions; root cause certainty gates confidence
+        missing_severity = min(missing_rate / 0.50, 1.0)
+        dup_severity = min(duplicate_rate / 0.20, 1.0)
         schema_severity = min(schema_errors / 100, 1.0)
-        root_cause_certainty = backup_available * pipeline_health  # Backup + health = confidence
-        data_issue_severity = max(missing_severity, schema_severity)
+        # root cause certainty: confident when backup available + pipeline healthy
+        root_cause_certainty = float(backup_available) * pipeline_health
 
         state_features = {
             "missing_severity": missing_severity,
+            "duplicate_severity": dup_severity,
             "schema_severity": schema_severity,
             "root_cause_certainty": root_cause_certainty,
-            "backup_availability": float(backup_available),
             "pipeline_repairability": pipeline_health,
             "historical_success": historical_success,
         }
-
         weights = {
             "missing_severity": 0.25,
-            "schema_severity": 0.10,
-            "root_cause_certainty": 0.30,
-            "backup_availability": 0.15,
+            "duplicate_severity": 0.10,
+            "schema_severity": 0.15,
+            "root_cause_certainty": 0.25,
             "pipeline_repairability": 0.10,
-            "historical_success": 0.10,
+            "historical_success": 0.15,
         }
-
         confidence = self._compute_confidence_from_state(state_features, weights)
 
+        total_affected_rate = missing_rate + duplicate_rate + schema_errors / 1000.0
         return RemediationPlan(
             agent_type=self.agent_type,
             action="repair_data_quality",
             confidence=confidence,
             expected_effect={
-                "missing_rate_reduction": -missing_rate * 0.9,  # Remove 90% of nulls
-                "duplicate_removal": -duplicate_rate,
-                "schema_fix": -schema_errors,
-                "future_incident_prevention": True,
+                "missing_rate_delta": -missing_rate * 0.90,
+                "duplicate_rate_delta": -duplicate_rate,
+                "schema_error_delta": -schema_errors,
+                "false_negative_rate_delta": -total_affected_rate * 0.50,
+                "cost_delta_usd": 0.0,
             },
             reasoning=(
-                f"Data quality degradation (missing={missing_rate:.2f}, duplicates={duplicate_rate:.2f}, "
-                f"schema_errors={schema_errors}) affecting features {affected_features} → "
-                f"repair at source (backup_available={backup_available}, pipeline_health={pipeline_health:.2f})"
+                f"missing={missing_rate:.2f} dup={duplicate_rate:.2f} schema={schema_errors} "
+                f"features={affected_features} "
+                f"→ repair (backup={backup_available} pipeline={pipeline_health:.2f})"
             ),
             cost="$100",
             execution_time="300 seconds",
-            risk=0.20,  # Risk: repair process might affect other data
+            risk=0.20,
         )
 
     async def execute(self, plan: RemediationPlan) -> Any:

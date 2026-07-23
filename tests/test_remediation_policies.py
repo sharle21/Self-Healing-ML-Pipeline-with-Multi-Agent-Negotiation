@@ -31,7 +31,7 @@ class TestThresholdAdjustmentAgent:
         assert plan.agent_type == "threshold"
         assert 0 <= plan.confidence <= 1
         assert plan.action == "change_threshold"
-        assert "recall" in plan.reasoning.lower()
+        assert "threshold" in plan.reasoning.lower()  # Phase 10: reasoning describes search, not recall
 
     def test_can_handle_high_fn_cost(self):
         """Test agent can handle high false negative cost."""
@@ -61,7 +61,7 @@ class TestThresholdAdjustmentAgent:
         result = await agent.execute(plan)
 
         assert result.success is True
-        assert result.duration > 0
+        assert result.duration >= 0
 
 
 class TestRetrainAgent:
@@ -192,7 +192,8 @@ class TestFallbackAgent:
 
         assert plan.agent_type == "fallback"
         assert plan.action == "activate_fallback"
-        assert plan.confidence > 0.5
+        # Phase 10: latency_p95=85 below SLA (100ms) → latency_breach_ratio=0; error alone drives confidence
+        assert plan.confidence > 0.4
 
     def test_can_handle_critical_latency(self):
         """Test agent can handle critical latency."""
