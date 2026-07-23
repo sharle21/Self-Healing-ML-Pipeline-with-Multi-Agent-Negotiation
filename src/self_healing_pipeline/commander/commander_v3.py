@@ -34,6 +34,7 @@ from self_healing_pipeline.observability import (
 )
 from self_healing_pipeline.commander.utility import UtilityScorer, UtilityWeights
 from self_healing_pipeline.verification import RewardCalculator
+from self_healing_pipeline.verification.guardrails import GuardrailChecker
 from self_healing_pipeline.verification.reward import OutcomeReward
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,8 @@ class CommanderResultV3:
     reconciliation_log: dict[str, Any] | None = None
     escalation_triggered: bool = False
     escalation_log: dict[str, Any] | None = None
+    guardrail_violations: list[str] | None = None   # Phase 13: explicit guardrail violations
+    auto_rollback_triggered: bool = False            # Phase 13: auto-rollback on guardrail+regression
 
 
 class CommanderV3:
@@ -290,15 +293,46 @@ class CommanderV3:
         reward, outcome_breakdown = RewardCalculator.calculate_from_incident_states(
             incident_state, incident_state_after, execution_agent.agent_type, execution_result
         )
-        incident_resolved = outcome_breakdown.resolution_score > 0.5
+
+        # Phase 13: Explicit multi-dimensional guardrail check
+        guardrail_result = GuardrailChecker.check(incident_state, incident_state_after)
+        if guardrail_result.violations:
+            logger.warning("[Verify] Guardrail violations: %s", guardrail_result.violations)
+
+        # Resolution verdict: guardrail check is authoritative over reward threshold
+        incident_resolved = guardrail_result.resolved
 
         logger.info(
-            "[Verify] Reward=%.3f resolved=%s "
+            "[Verify] Reward=%.3f resolved=%s guardrail_no_regression=%s "
             "(quality_gain=%.2f cost_gain=%.2f reliability_gain=%.2f latency_gain=%.2f)",
-            reward, incident_resolved,
+            reward, incident_resolved, guardrail_result.no_regression,
             outcome_breakdown.quality_gain, outcome_breakdown.cost_gain,
             outcome_breakdown.reliability_gain, outcome_breakdown.latency_gain,
         )
+
+        # Phase 13: Auto-rollback — triggered when guardrails fail AND regression detected
+        auto_rollback_triggered = False
+        if guardrail_result.should_rollback and execution_agent.agent_type != "rollback":
+            rollback_agent = next(
+                (a for a in self.agents if a.agent_type == "rollback"),
+                None,
+            )
+            if rollback_agent is not None:
+                logger.warning(
+                    "[Verify] Auto-rollback triggered — guardrails failed + regression detected"
+                )
+                try:
+                    rb_state = self._get_agent_state_v2(
+                        incident.type, incident_state, incident.payload
+                    )
+                    rb_plan = await rollback_agent.analyze(rb_state)
+                    rb_result = await rollback_agent.execute(rb_plan)
+                    auto_rollback_triggered = True
+                    logger.info(
+                        "[Verify] Auto-rollback completed (success=%s)", rb_result.success
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("[Verify] Auto-rollback failed: %s", exc)
 
         # Store remediation action with reward
         self._store_remediation_action(incident, execution_agent, winning_plan, execution_result, reward)
@@ -315,6 +349,10 @@ class CommanderV3:
             "auc_before": outcome_breakdown.auc_before,
             "auc_after": outcome_breakdown.auc_after,
             "reward": reward,
+            "guardrail_resolved": guardrail_result.resolved,
+            "guardrail_no_regression": guardrail_result.no_regression,
+            "guardrail_violations": guardrail_result.violations,
+            "auto_rollback_triggered": auto_rollback_triggered,
         }
 
         return CommanderResultV3(
@@ -332,6 +370,8 @@ class CommanderV3:
             reconciliation_log=reconciliation_log,
             escalation_triggered=escalation_triggered,
             escalation_log=escalation_log,
+            guardrail_violations=guardrail_result.violations,
+            auto_rollback_triggered=auto_rollback_triggered,
         )
 
     def _needs_reconciliation(self, top_confidence: float, second_confidence: float) -> bool:
