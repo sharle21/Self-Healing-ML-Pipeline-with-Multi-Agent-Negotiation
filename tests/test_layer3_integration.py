@@ -150,11 +150,11 @@ class TestVerificationLayerAccuracy:
 
         result = await commander.handle_incident(incident)
 
-        # Verification breakdown should have reward components
-        assert "metric_improvement" in result.verification_breakdown
-        assert "incident_resolution" in result.verification_breakdown
-        assert "cost_efficiency" in result.verification_breakdown
-        assert "risk_penalty" in result.verification_breakdown
+        # Verification breakdown should have Phase 14 OutcomeReward components
+        assert "quality_gain" in result.verification_breakdown
+        assert "resolution_score" in result.verification_breakdown
+        assert "exec_cost_penalty" in result.verification_breakdown
+        assert "regression_penalty" in result.verification_breakdown
         assert "reward" in result.verification_breakdown
 
 
@@ -178,8 +178,8 @@ class TestObservationLayerAccuracy:
 
         # Severity should be calculated from telemetry, not use incident.severity
         assert 0 <= result.severity <= 1
-        # With drift signal, severity should be non-trivial
-        assert result.severity > 0.3
+        # With drift signal, severity should be non-trivial (Phase 9: no baseline → auc_drop=0, but drift+volume fire)
+        assert result.severity > 0.15
 
 
 class TestRemediationPolicySelection:
