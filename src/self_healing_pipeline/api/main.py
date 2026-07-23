@@ -304,6 +304,16 @@ def update_model_metrics(body: ModelQualityUpdate) -> None:
         feature_drift_score.labels(tenant_id=tid, feature=feat).set(score)
 
 
+@app.post("/internal/reload-model", status_code=204)
+def reload_model(request: Request) -> None:
+    """Reload model from disk after retraining or rollback."""
+    server = getattr(request.app.state, "model_server", None)
+    if server is None:
+        raise HTTPException(status_code=503, detail="model not loaded")
+    settings = get_settings()
+    server.reload(settings.model_path)
+
+
 @app.get("/metrics")
 def metrics() -> Response:
     """Prometheus metrics endpoint."""

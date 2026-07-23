@@ -222,3 +222,37 @@ class PolicyWeights(Base):
     __table_args__ = (
         Index("idx_policy_weights_version", "version"),
     )
+
+
+class TenantThresholdOverride(Base):
+    """Live decision threshold written by ThresholdAgent; read by ModelServer on each predict."""
+
+    __tablename__ = "tenant_threshold_overrides"
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(64), nullable=False, default="system")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ModelRegistry(Base):
+    """Tracks trained model versions for retrain + rollback."""
+
+    __tablename__ = "model_registry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    artifact_path: Mapped[str] = mapped_column(String(256), nullable=False)
+    backup_path: Mapped[str] = mapped_column(String(256), nullable=True)
+    overall_auc: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (
+        Index("idx_model_registry_version", "model_version"),
+        Index("idx_model_registry_status_ts", "status", "created_at"),
+    )

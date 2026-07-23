@@ -191,22 +191,45 @@ async def main(argv: list[str] | None = None) -> int:
     start_http_server(8002)
     logger.info("metrics server started on :8002")
 
-    # Build CommanderV3 with all 5 agents
+    # Build CommanderV3 with all 5 agents (real actions wired in)
     from self_healing_pipeline.agents.datarepair_v2 import DataRepairAgent
     from self_healing_pipeline.agents.fallback_v2 import FallbackAgent
     from self_healing_pipeline.agents.retrain_v2 import RetrainAgent
     from self_healing_pipeline.agents.rollback_v2 import RollbackAgent
     from self_healing_pipeline.agents.threshold_v2 import ThresholdAdjustmentAgent
     from self_healing_pipeline.commander.commander_v3 import CommanderV3
+    from self_healing_pipeline.config import get_settings
+    from self_healing_pipeline.db.session import create_all, session_scope
+
+    settings = get_settings()
+    api_url = f"http://{settings.api_host}:{settings.api_port}"
+
+    # Ensure new DB tables exist (idempotent)
+    create_all()
 
     agents = [
-        ThresholdAdjustmentAgent("threshold-1"),
-        RetrainAgent("retrain-1"),
-        RollbackAgent("rollback-1"),
+        ThresholdAdjustmentAgent("threshold-1", session_factory=session_scope),
+        RetrainAgent(
+            "retrain-1",
+            model_path=settings.model_path,
+            session_factory=session_scope,
+            api_url=api_url,
+        ),
+        RollbackAgent(
+            "rollback-1",
+            model_path=settings.model_path,
+            session_factory=session_scope,
+            api_url=api_url,
+        ),
         FallbackAgent("fallback-1"),
         DataRepairAgent("datarepair-1"),
     ]
-    commander = CommanderV3(agents)
+    commander = CommanderV3(
+        agents,
+        session_factory=session_scope,
+        use_mock_telemetry=False,     # use real Prometheus
+        stabilization_seconds=15.0,   # wait 15s for Prometheus gauges to update
+    )
 
     fired: set[str] = set()  # cooldown: (tenant, type) seen in last cycle
 
