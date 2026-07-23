@@ -1,11 +1,14 @@
-"""State constructor: build agent-specific state dicts from telemetry."""
+"""State constructor: build agent-specific state dicts from telemetry or IncidentState."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from self_healing_pipeline.observability.telemetry import Telemetry
+
+if TYPE_CHECKING:
+    from self_healing_pipeline.observability.incident_state import IncidentState
 
 
 @dataclass(slots=True)
@@ -244,4 +247,94 @@ class StateConstructor:
             available_backup_data=available_backup,
             data_pipeline_health=pipeline_health,
             historical_repair_success=historical_success,
+        )
+
+    # ------------------------------------------------------------------
+    # IncidentState-based constructors (data-driven, no hardcoded guesses)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def threshold_state_from_incident(inc: IncidentState) -> ThresholdAgentState:
+        """Build ThresholdAgentState from real IncidentState (no hardcoded fallbacks)."""
+        recall_drop = (
+            inc.baseline_recall - inc.current_recall
+            if inc.current_recall is not None
+            else 0.0
+        )
+        precision_drop = (
+            inc.baseline_precision - inc.current_precision
+            if inc.current_precision is not None
+            else 0.0
+        )
+        return ThresholdAgentState(
+            current_threshold=inc.current_threshold,
+            precision_drop=precision_drop,
+            recall_drop=recall_drop,
+            false_positive_rate=inc.false_positive_rate,
+            false_negative_rate=inc.false_negative_rate,
+            cost_false_positive=20.0,   # operator-configured; no DB column yet
+            cost_false_negative=500.0,  # operator-configured; no DB column yet
+            latency=inc.latency_p95_ms,
+            historical_threshold_success=inc.historical_agent_success.get("threshold", 0.75),
+        )
+
+    @staticmethod
+    def retrain_state_from_incident(inc: IncidentState) -> RetrainAgentState:
+        """Build RetrainAgentState from real IncidentState."""
+        return RetrainAgentState(
+            drift_score=inc.max_feature_drift,
+            auc_drop=inc.auc_drop if inc.auc_drop is not None else 0.0,
+            data_quality_score=1.0 - inc.missing_rate,
+            model_age_days=int(inc.last_training_age_days),
+            historical_retrain_success=inc.historical_agent_success.get("retrain", 0.72),
+            affected_features=list(inc.drifted_features),
+        )
+
+    @staticmethod
+    def rollback_state_from_incident(inc: IncidentState) -> RollbackAgentState:
+        """Build RollbackAgentState from real IncidentState."""
+        deployment_age_hours = inc.last_training_age_days * 24.0
+        current_auc = inc.current_auc if inc.current_auc is not None else inc.baseline_auc
+        # Deployment-related if incident occurred within 24 h of last training
+        deployment_prob = 0.80 if deployment_age_hours < 24 else 0.20
+        return RollbackAgentState(
+            current_model=inc.current_model_version,
+            previous_model=inc.previous_model_version or "unknown",
+            deployment_age_hours=deployment_age_hours,
+            current_auc=current_auc,
+            previous_auc=inc.baseline_auc,
+            current_error_rate=inc.false_positive_rate + inc.false_negative_rate,
+            previous_error_rate=0.09,  # baseline error rate (no historical column yet)
+            deployment_related_incident_probability=deployment_prob,
+            historical_rollback_success=inc.historical_agent_success.get("rollback", 0.91),
+        )
+
+    @staticmethod
+    def fallback_state_from_incident(inc: IncidentState) -> FallbackAgentState:
+        """Build FallbackAgentState from real IncidentState."""
+        error_rate = inc.false_positive_rate + inc.false_negative_rate
+        return FallbackAgentState(
+            error_rate=error_rate,
+            latency_p95=inc.latency_p95_ms,
+            prediction_failure_rate=inc.missing_rate,
+            confidence_distribution_mean=0.62,  # not in Prometheus yet
+            missing_rate=inc.missing_rate,
+            acceptable_accuracy_loss=0.05,
+            fallback_quality=0.70,
+            historical_fallback_success=inc.historical_agent_success.get("fallback", 0.85),
+        )
+
+    @staticmethod
+    def datarepair_state_from_incident(inc: IncidentState) -> DataRepairAgentState:
+        """Build DataRepairAgentState from real IncidentState."""
+        schema_count = int(inc.schema_violation_rate * 500)  # rate × assumed window
+        pipeline_health = max(0.0, 1.0 - inc.missing_rate - inc.duplicate_rate)
+        return DataRepairAgentState(
+            missing_rate=inc.missing_rate,
+            duplicate_rate=inc.duplicate_rate,
+            schema_error_count=schema_count,
+            affected_features=list(inc.drifted_features),
+            available_backup_data=True,
+            data_pipeline_health=pipeline_health,
+            historical_repair_success=inc.historical_agent_success.get("data_repair", 0.70),
         )

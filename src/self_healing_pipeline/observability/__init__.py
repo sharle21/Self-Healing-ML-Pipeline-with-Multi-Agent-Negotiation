@@ -1,6 +1,7 @@
 """Observation layer: telemetry collection, severity calculation, state construction."""
 
-from self_healing_pipeline.observability.severity import SeverityCalculator, SeverityBreakdown
+from self_healing_pipeline.observability.incident_state import IncidentState, IncidentStateBuilder
+from self_healing_pipeline.observability.severity import SeverityBreakdown, SeverityCalculator
 from self_healing_pipeline.observability.state import (
     DataRepairAgentState,
     FallbackAgentState,
@@ -31,4 +32,6 @@ __all__ = [
     "RollbackAgentState",
     "FallbackAgentState",
     "DataRepairAgentState",
+    "IncidentState",
+    "IncidentStateBuilder",
 ]
