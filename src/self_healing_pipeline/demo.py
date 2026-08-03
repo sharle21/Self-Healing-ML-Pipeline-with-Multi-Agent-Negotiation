@@ -11,7 +11,9 @@ from self_healing_pipeline.agents.retrain_v2 import RetrainAgent
 from self_healing_pipeline.agents.rollback_v2 import RollbackAgent
 from self_healing_pipeline.agents.threshold_v2 import ThresholdAdjustmentAgent
 from self_healing_pipeline.commander.commander_v3 import CommanderV3
+from self_healing_pipeline.config import get_settings
 from self_healing_pipeline.gateway.events import Incident, IncidentType
+from self_healing_pipeline.memory.tier3_traces import BundleWriter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,7 +29,9 @@ async def main() -> None:
         DataRepairAgent("datarepair-1"),
     ]
 
-    commander = CommanderV3(agents)
+    commander = CommanderV3(
+        agents, bundle_writer=BundleWriter(get_settings().traces_dir)
+    )
 
     incident = Incident(
         tenant_id="enterprise",

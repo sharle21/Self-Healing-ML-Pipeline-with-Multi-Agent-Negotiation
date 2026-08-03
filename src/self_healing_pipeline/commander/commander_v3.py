@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from self_healing_pipeline.db.models import (
     TenantPolicy,
     TenantTierConfig,
 )
+from self_healing_pipeline.memory.tier3_traces import BundleWriter
 from self_healing_pipeline.observability.metrics import (
     agent_proposal_count,
     agent_win_count,
@@ -78,6 +80,7 @@ class CommanderV3:
         session_factory: Any | None = None,
         use_mock_telemetry: bool = True,
         stabilization_seconds: float = 0.0,
+        bundle_writer: BundleWriter | None = None,
     ) -> None:
         """Initialize Commander V3.
 
@@ -89,6 +92,10 @@ class CommanderV3:
             use_mock_telemetry: if True, TelemetryCollector uses mock data (for testing)
             stabilization_seconds: seconds to wait after execution before sampling post-action
                 metrics. 0 in tests; 10-30 in production to let Prometheus gauges update.
+            bundle_writer: optional writer for per-incident evidence bundles, consumed
+                offline by EvidenceBundleAnalyzer/WeightTuner. None (default) disables
+                writing entirely, so unit tests don't touch the real traces_dir; pass
+                BundleWriter(settings.traces_dir) explicitly to enable it in production.
         """
         self.agents = agents
         self.sonnet_model = sonnet_model
@@ -103,6 +110,7 @@ class CommanderV3:
         self.incident_state_builder = IncidentStateBuilder(
             self.telemetry_collector, session_factory=session_factory
         )
+        self.bundle_writer = bundle_writer
 
     async def handle_incident(self, incident: Incident) -> CommanderResultV3:
         """Handle incident end-to-end: observe → decide → verify → reward.
@@ -355,7 +363,7 @@ class CommanderV3:
             "auto_rollback_triggered": auto_rollback_triggered,
         }
 
-        return CommanderResultV3(
+        result = CommanderResultV3(
             incident_id=incident.id,
             incident_type=incident.type.value,
             severity=severity,
@@ -373,6 +381,35 @@ class CommanderV3:
             guardrail_violations=guardrail_result.violations,
             auto_rollback_triggered=auto_rollback_triggered,
         )
+
+        # Feed the offline meta-harness (EvidenceBundleAnalyzer → WeightTuner):
+        # write the same schema the analyzer already expects (see traces/*/evidence_bundle.json
+        # from earlier demo runs). Gated on db_session like the other persistence calls in this
+        # method — writing is opt-in via bundle_writer, off by default (see __init__).
+        if self.bundle_writer is not None:
+            self.bundle_writer.write(
+                incident.id,
+                {
+                    "incident": {
+                        "id": incident.id,
+                        "tenant_id": incident.tenant_id,
+                        "type": incident.type.value,
+                        "severity": severity,
+                        "detected_at": incident.created_at.isoformat(),
+                        "affected_features": list(incident.affected_features),
+                    },
+                    "all_proposals": [
+                        {"agent_type": a.agent_type, "confidence": p.confidence, "risk": p.risk}
+                        for a, p, _ in ranked
+                    ],
+                    "winner": {"agent_type": execution_agent.agent_type, "utility": winning_utility},
+                    "execution_result": result.execution_result,
+                    "reconciliation": reconciliation_log,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )
+
+        return result
 
     def _needs_reconciliation(self, top_confidence: float, second_confidence: float) -> bool:
         """Check if top 2 agents are close enough to warrant reconciliation.

@@ -200,6 +200,7 @@ async def main(argv: list[str] | None = None) -> int:
     from self_healing_pipeline.commander.commander_v3 import CommanderV3
     from self_healing_pipeline.config import get_settings
     from self_healing_pipeline.db.session import create_all, session_scope
+    from self_healing_pipeline.memory.tier3_traces import BundleWriter
 
     settings = get_settings()
     api_url = f"http://{settings.api_host}:{settings.api_port}"
@@ -229,6 +230,7 @@ async def main(argv: list[str] | None = None) -> int:
         session_factory=session_scope,
         use_mock_telemetry=False,     # use real Prometheus
         stabilization_seconds=15.0,   # wait 15s for Prometheus gauges to update
+        bundle_writer=BundleWriter(settings.traces_dir),  # feed offline meta-harness
     )
 
     fired: set[str] = set()  # cooldown: (tenant, type) seen in last cycle
