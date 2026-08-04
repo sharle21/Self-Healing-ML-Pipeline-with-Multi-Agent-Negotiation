@@ -1,5 +1,10 @@
 # Evaluation
 
+Results and numbers. For how the scenarios/baselines were designed and what
+statistical claims they do/don't support, see [methodology.md](methodology.md).
+
+![Results](../assets/results.png)
+
 ## Scenarios
 
 The system is evaluated across 12 deterministic incident scenarios with
