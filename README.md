@@ -23,6 +23,17 @@ accumulated outcomes.
 
 ## Architecture
 
+### Incident Lifecycle
+
+```mermaid
+flowchart LR
+    A[Traffic] --> B[Telemetry] --> C[Incident] --> D[5 Agents]
+    D --> E[Commander] --> F[Execution] --> G[Verification]
+    G --> H[Reward] --> I[Policy Update]
+```
+
+### Full System
+
 ```mermaid
 flowchart TD
     A[Dataset Replay and Fault Injection] --> B[FastAPI Prediction Service]
@@ -62,9 +73,31 @@ per component: [docs/implementation.md](docs/implementation.md).
 
 Sequence diagram: [assets/workflow.md](assets/workflow.md).
 
+### Guardrail Verification
+
+```mermaid
+flowchart LR
+    A[Before] --> B[Execute] --> C[Stabilize] --> D[Metrics] --> E[Guardrails]
+    E --> F{Resolved?}
+    F -- no --> G{Rollback?}
+```
+
+Full guardrail thresholds and auto-rollback conditions:
+[docs/implementation.md#verification](docs/implementation.md#verification).
+
 ---
 
 ## Key Engineering Decisions
+
+### Commander Decision
+
+```mermaid
+flowchart LR
+    T[Threshold] --> U[Utility]
+    R[Retrain] --> U
+    B[Rollback] --> U
+    U --> W[Winner]
+```
 
 - **Utility scoring instead of confidence-only ranking** — confidence
   measures "how sure is this agent in itself," not "is this the right fix
