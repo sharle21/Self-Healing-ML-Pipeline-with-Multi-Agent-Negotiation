@@ -41,3 +41,7 @@ models/
 logs/
 traces/
 weight_versions/
+
+# interview-prep docs: only README.md + docs/*.md + assets/*.md stay tracked
+/*.md
+!/README.md
