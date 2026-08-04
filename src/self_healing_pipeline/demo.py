@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from sqlalchemy.orm import Session
+
 from self_healing_pipeline.agents.datarepair_v2 import DataRepairAgent
 from self_healing_pipeline.agents.fallback_v2 import FallbackAgent
 from self_healing_pipeline.agents.retrain_v2 import RetrainAgent
@@ -12,6 +14,7 @@ from self_healing_pipeline.agents.rollback_v2 import RollbackAgent
 from self_healing_pipeline.agents.threshold_v2 import ThresholdAdjustmentAgent
 from self_healing_pipeline.commander.commander_v3 import CommanderV3
 from self_healing_pipeline.config import get_settings
+from self_healing_pipeline.db.session import create_all, get_engine
 from self_healing_pipeline.gateway.events import Incident, IncidentType
 from self_healing_pipeline.memory.tier3_traces import BundleWriter
 
@@ -29,22 +32,26 @@ async def main() -> None:
         DataRepairAgent("datarepair-1"),
     ]
 
-    commander = CommanderV3(
-        agents, bundle_writer=BundleWriter(get_settings().traces_dir)
-    )
+    create_all()
+    with Session(get_engine(), future=True) as session:
+        commander = CommanderV3(
+            agents,
+            db_session=session,
+            bundle_writer=BundleWriter(get_settings().traces_dir),
+        )
 
-    incident = Incident(
-        tenant_id="enterprise",
-        type=IncidentType.DRIFT,
-        payload={"feature": "income", "threshold": 50000.0, "flip_prob": 0.8},
-        severity=0.85,
-        affected_features=("income", "age"),
-    )
+        incident = Incident(
+            tenant_id="enterprise",
+            type=IncidentType.DRIFT,
+            payload={"feature": "income", "threshold": 50000.0, "flip_prob": 0.8},
+            severity=0.85,
+            affected_features=("income", "age"),
+        )
 
-    logger.info(f"🚨 Incident created: {incident.id} (type={incident.type.value})")
-    logger.info(f"   Tenant: {incident.tenant_id}")
+        logger.info(f"🚨 Incident created: {incident.id} (type={incident.type.value})")
+        logger.info(f"   Tenant: {incident.tenant_id}")
 
-    result = await commander.handle_incident(incident)
+        result = await commander.handle_incident(incident)
 
     logger.info(f"\n✅ Winner: {result.winning_agent_type}")
     logger.info(
