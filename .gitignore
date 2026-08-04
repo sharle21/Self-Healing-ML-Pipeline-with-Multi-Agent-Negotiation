@@ -36,7 +36,8 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
-data/raw/
-data/processed/
-models/*.pkl
+data/
+models/
 logs/
+traces/
+weight_versions/
