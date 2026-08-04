@@ -425,13 +425,28 @@ verification from real before/after metrics.
 
 The meta-harness is an **offline batch system**, not a real-time learning loop.
 
-1. `EvidenceBundleAnalyzer` reads JSON traces from resolved incidents;
-   computes per-agent success rates and confidence calibration accuracy.
-2. `WeightTuner` applies scipy t-tests (p < 0.05) and adjusts
+1. `CommanderV3` writes an evidence bundle (`traces/run_<incident_id>/evidence_bundle.json`)
+   after every incident it resolves — winner, proposals, execution result,
+   reconciliation outcome.
+2. `EvidenceBundleAnalyzer` reads those bundles; computes per-agent success
+   rates and confidence calibration accuracy.
+3. `WeightTuner` applies scipy t-tests (p < 0.05) and adjusts
    `ScoringWeights` only when the performance difference is statistically
    significant.
-3. `CanaryWeightManager` rolls new weights to a configurable share of
-   traffic with automatic rollback if the success rate drops below threshold.
+4. `meta_harness/apply.py::sync_tuned_weights()` writes the tuned weights
+   into each tenant's `TenantTierConfig` row — the same row
+   `UtilityScorer.weights_from_tier_config()` reads on every live incident —
+   so the next decision actually uses them.
+5. `CanaryWeightManager` rolls new weights to a configurable share of
+   traffic with automatic rollback if the success rate drops below threshold
+   (implemented, not yet invoked by the production entrypoint below).
+
+Run the full offline cycle against the live DB with:
+
+```bash
+uv run python scripts/tune_weights.py            # analyze → tune → version → apply
+uv run python scripts/tune_weights.py --dry-run   # analyze/tune only, no writes
+```
 
 ---
 
@@ -537,20 +552,26 @@ uv run python -m uvicorn src.self_healing_pipeline.api.main:app --reload
 ### Replay Traffic
 
 ```bash
-uv run python scripts/replay_traffic.py
+uv run python scripts/replay.py
 ```
 
 ### Trigger an Incident
 
 ```bash
-uv run python scripts/trigger_incident.py
+uv run python scripts/trigger_incidents.py --once
 ```
 
 ### Run Demo
 
 ```bash
-uv run python src/self_healing_pipeline/demo_week3.py
+uv run python -m src.self_healing_pipeline.demo    # single incident, full 3-layer pipeline
+uv run python scripts/tune_weights.py               # tune + apply from accumulated evidence
 ```
+
+Run the first command a few times to accumulate evidence, then the second —
+weights change live in `tenant_tier_config`, and the next incident's agent
+ranking reflects it. (`demo_week2.py`/`demo_week3.py` are earlier, superseded
+milestones kept for reference.)
 
 ---
 
@@ -595,10 +616,10 @@ tests/
 └── ...                           # 20+ additional test modules
 
 scripts/
-├── train.py
-├── replay_traffic.py
-├── trigger_incident.py
-└── evaluate_policies.py
+├── train.py               # train baseline model on UCI dataset
+├── replay.py               # replay UCI test set through live prediction API
+├── trigger_incidents.py    # watch Prometheus, fire real incidents into CommanderV3
+└── tune_weights.py         # analyze evidence -> tune -> version -> apply to live DB
 ```
 
 ---
@@ -606,7 +627,7 @@ scripts/
 ## Testing
 
 ```bash
-uv run pytest tests/                    # 454 tests, 1 skipped
+uv run pytest tests/                    # 465 tests, 1 skipped
 ```
 
 | Test module | What it covers |
@@ -662,8 +683,12 @@ Set via `.env` file or environment. See `src/self_healing_pipeline/config/settin
   production deployment.
 - The data-repair action operates on the replay environment, not a real
   upstream data warehouse.
-- The meta-harness tunes `ScoringWeights` (legacy); Phase 11's `UtilityWeights`
-  are not yet wired to offline learning.
+- The meta-harness tunes `ScoringWeights` and now writes them into each
+  tenant's `TenantTierConfig` row (`meta_harness/apply.py`), which the live
+  commander reads via `UtilityScorer.weights_from_tier_config`. However,
+  tuning is currently global, not per-tenant — the same tuned weights are
+  applied to every tenant, which can overwrite a tenant's deliberate
+  cost/quality tradeoff. Per-tenant analysis is not yet implemented.
 
 ---
 
@@ -673,7 +698,7 @@ Set via `.env` file or environment. See `src/self_healing_pipeline/config/settin
 - Delayed and partially observed labels
 - PostgreSQL-backed control-plane storage
 - Contextual-bandit policy learning from verified outcomes
-- Wire meta-harness offline tuning to `UtilityWeights` (Phase 11 path)
+- Per-tenant meta-harness tuning (currently applies one global weight set to all tenants)
 - Production deployment (Docker, Kubernetes)
 
 ---
@@ -688,4 +713,4 @@ rollback / fallback / data repair actions, verifies outcomes against explicit
 multi-dimensional guardrails with auto-rollback, and persists evidence
 bundles for offline policy adaptation.
 
-454 tests. All 17 build phases complete.
+465 tests. All 17 build phases complete.
